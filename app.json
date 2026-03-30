@@ -27,7 +27,9 @@
       "package": "com.redel.movil",
       "permissions": [
         "VIBRATE",
-        "CAMERA"
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -39,6 +41,13 @@
           "cameraPermission": "Permitir a RedelMovil usar la cámara para escanear códigos de barras"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "baafaa26-a4c3-4ac8-94ff-165bb6bd2370"
+      }
+    },
+    "owner": "carlosretuerto"
   }
 }
