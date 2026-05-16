@@ -21,7 +21,8 @@ const useSettingsStore = create<SettingsState>((set) => ({
       const json = await AsyncStorage.getItem(STORAGE_KEY);
       if (json) {
         const data = JSON.parse(json);
-        set({ scannerMode: data.scannerMode || 'ambos', ready: true });
+        // Si hay un valor guardado explícitamente, úsalo; si no, default ambos
+        set({ scannerMode: data.scannerMode ?? 'ambos', ready: true });
         return;
       }
     } catch {}

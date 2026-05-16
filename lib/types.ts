@@ -23,7 +23,7 @@ export interface ProductoEscaneado {
   color_id: string;
   talla_id: string;
   stockTotal: number;
-  stockPorAlmacen: { almacen_id: string; almacen_nombre: string; almacen_codigo: string; cantidad: number }[];
+  stockPorAlmacen: { almacen_id: string; almacen_nombre: string; almacen_codigo: string; cantidad: number; color_hex: string | null }[];
   tallasMismoColor: { variante_id: string; talla: string; codigo_barras: string; stock_total: number; es_actual: boolean }[];
   coloresDisponibles: { color_nombre: string; stock_total: number; codigo_barras: string }[];
 }

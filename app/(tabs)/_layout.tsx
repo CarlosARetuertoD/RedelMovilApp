@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View, Text, Pressable, Dimensions } from 'react-native';
-import { ScanBarcode, ClipboardList, Search, Package, User } from 'lucide-react-native';
+import { ScanBarcode, Search, User } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { C } from '../../lib/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,14 +41,13 @@ export default function TabLayout() {
       headerShadowVisible: false,
       headerRight: () => <HeaderRight />,
     }}>
-      <Tabs.Screen name="index" options={{ title: 'Consultas', headerTitle: 'Consultas',
-        tabBarIcon: ({ color, focused }) => <Search size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
       <Tabs.Screen name="escaner" options={{ title: 'Escáner', headerTitle: 'Escáner',
         tabBarIcon: ({ color, focused }) => <ScanBarcode size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
-      <Tabs.Screen name="conteo" options={{ title: 'Conteo', headerTitle: 'Conteo',
-        tabBarIcon: ({ color, focused }) => <ClipboardList size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
-      <Tabs.Screen name="operaciones" options={{ title: 'Operaciones', headerTitle: 'Operaciones',
-        tabBarIcon: ({ color, focused }) => <Package size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
+      <Tabs.Screen name="consultas" options={{ title: 'Consultas', headerTitle: 'Consultas',
+        tabBarIcon: ({ color, focused }) => <Search size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
+      <Tabs.Screen name="index" options={{ href: null }} />
+      <Tabs.Screen name="conteo" options={{ href: null }} />
+      <Tabs.Screen name="operaciones" options={{ href: null }} />
       <Tabs.Screen name="movimientos" options={{ href: null }} />
     </Tabs>
   );

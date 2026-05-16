@@ -91,7 +91,7 @@ export async function escanearProducto(codigoBarras: string): Promise<ProductoEs
   const stocks = await queryAll('SELECT almacen_id, cantidad FROM stock WHERE variante_id = ? AND cantidad > 0', [variante.id]);
   const stockPorAlmacen = stocks.map((s: any) => {
     const alm: any = cats.almacenMap.get(s.almacen_id);
-    return { almacen_id: s.almacen_id, almacen_nombre: alm?.nombre || '?', almacen_codigo: alm?.codigo || '?', cantidad: s.cantidad };
+    return { almacen_id: s.almacen_id, almacen_nombre: alm?.nombre || '?', almacen_codigo: alm?.codigo || '?', cantidad: s.cantidad, color_hex: alm?.color_hex || null };
   }).sort((a: any, b: any) => b.cantidad - a.cantidad);
   const stockTotal = stockPorAlmacen.reduce((sum: number, s: any) => sum + s.cantidad, 0);
 

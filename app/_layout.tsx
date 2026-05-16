@@ -9,6 +9,8 @@ import useAuthStore from '../store/authStore';
 import useSyncStore, { setSyncDoneCallback } from '../store/syncStore';
 import useSettingsStore from '../store/settingsStore';
 import { C } from '../lib/colors';
+import { supabase } from '../lib/supabase';
+import { upsertRows } from '../lib/localDB';
 
 ExpoSplash.preventAutoHideAsync().catch(() => {});
 
@@ -34,6 +36,31 @@ export default function RootLayout() {
     useSettingsStore.getState().init();
     setSyncDoneCallback(() => queryClient.invalidateQueries());
   }, []);
+
+  // Realtime — escucha cambios de stock en Supabase y actualiza SQLite al instante
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const channel = supabase
+      .channel('redelmovilapp-stock')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, async (payload) => {
+        if (payload.eventType === 'DELETE') return;
+        try {
+          await upsertRows('stock', [payload.new], ['id', 'variante_id', 'almacen_id', 'cantidad', 'updated_at']);
+          queryClient.invalidateQueries();
+        } catch {}
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'variantes' }, async (payload) => {
+        if (payload.eventType === 'DELETE') return;
+        try {
+          await upsertRows('variantes', [payload.new], ['id', 'sku_variant', 'codigo_barras', 'producto_id', 'color_id', 'talla_id', 'precio', 'activo', 'updated_at']);
+          queryClient.invalidateQueries();
+        } catch {}
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [isAuthenticated]);
 
   // Sync al autenticarse
   useEffect(() => {

@@ -16,7 +16,7 @@ const TABLES: SyncTable[] = [
   { name: 'categorias', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
   { name: 'subcategorias', columns: ['id', 'valor', 'categoria_id', 'activo', 'updated_at'], pageSize: 500 },
   { name: 'generos', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'almacenes', columns: ['id', 'nombre', 'codigo', 'activo', 'updated_at'], pageSize: 500 },
+  { name: 'almacenes', columns: ['id', 'nombre', 'codigo', 'color_hex', 'activo', 'updated_at'], pageSize: 500 },
   { name: 'productos', columns: ['id', 'sku_product', 'modelo', 'categoria_id', 'subcategoria_id', 'marca_id', 'fit_id', 'genero_id', 'precio', 'activo', 'updated_at'], pageSize: 900 },
   { name: 'variantes', columns: ['id', 'sku_variant', 'codigo_barras', 'producto_id', 'color_id', 'talla_id', 'precio', 'activo', 'updated_at'], pageSize: 900 },
   { name: 'stock', columns: ['id', 'variante_id', 'almacen_id', 'cantidad', 'updated_at'], pageSize: 900,
