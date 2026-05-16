@@ -199,10 +199,70 @@ npx expo start --clear
 # Testing con Expo Go (escanear QR)
 # Celular y PC en la misma red WiFi, o:
 npx expo start --tunnel
-
-# Build APK
-npx eas build --platform android --profile preview
 ```
+
+## Build APK
+
+### Requisitos (una sola vez)
+```bash
+# Instalar EAS CLI global
+npm install -g eas-cli
+
+# Loguearse en Expo
+eas login
+# Cuenta: carlosretuerto / cretuertodelgado@gmail.com
+
+# Inicializar proyecto EAS (ya hecho)
+eas init
+```
+
+### Generar APK (cada vez que quieras una nueva versión)
+```bash
+cd RedelMovilApp
+eas build --platform android --profile preview
+```
+- Tarda ~10-15 minutos
+- Se genera en la nube de Expo (no necesitas Android Studio)
+- Al terminar da un link para descargar el `.apk`
+- El APK se instala directo en cualquier Android
+
+### Perfiles de build (`eas.json`)
+- **preview** → genera `.apk` (instalación directa, para testing y distribución interna)
+- **production** → genera `.aab` (para subir a Google Play Store)
+
+### Variables de entorno
+Las keys de Supabase NO están en el código. Están configuradas en EAS:
+- `EXPO_PUBLIC_SUPABASE_URL` → URL de Supabase
+- `EXPO_PUBLIC_SUPABASE_KEY` → Service role key (sensitive)
+
+Para ver/editar: expo.dev → proyecto → Settings → Environment variables
+O por CLI:
+```bash
+eas env:list
+eas env:create --name NOMBRE --value "valor" --environment preview --visibility sensitive
+```
+
+### Archivo `.env` (solo para desarrollo local)
+```
+EXPO_PUBLIC_SUPABASE_URL=https://oihcnwjaqmygctmahwlp.supabase.co
+EXPO_PUBLIC_SUPABASE_KEY=<la key>
+```
+Este archivo está en `.gitignore`, NO se sube a GitHub.
+
+### Configuración importante
+- `.npmrc` tiene `legacy-peer-deps=true` — necesario para que EAS instale dependencias sin conflictos
+- `app.json` tiene permisos de CAMERA configurados
+- Keystore de Android se genera automáticamente en la nube de Expo
+
+### GitHub
+- Repo: https://github.com/CarlosARetuertoD/RedelMovilApp
+- Branch: `main`
+- Un push a main NO genera APK automáticamente (hay que lanzar build manual)
+- Se puede configurar auto-build desde expo.dev → Settings → GitHub
+
+### Primer APK generado
+- Build ID: `8dc451a5-c953-4e44-9113-b283531d4083`
+- Link: https://expo.dev/accounts/carlosretuerto/projects/redel-movil-app/builds/8dc451a5-c953-4e44-9113-b283531d4083
 
 ## Pendiente / TODO
 
@@ -212,14 +272,20 @@ npx eas build --platform android --profile preview
 - [ ] Sync: detectar borrados (soft-delete con activo=false en RedelERP)
 - [ ] Sync: RedelERP no sincroniza `password_visible` de perfiles nuevos
 - [ ] Exportar resumen de conteo al clipboard
-- [ ] Build APK con EAS
+- [ ] Configurar auto-build desde GitHub
+- [ ] Rotar service_role key de Supabase (la anterior quedó expuesta en historial de git)
 
 ## Notas técnicas
 
 - **expo-sqlite v16 con API SYNC** — la API async tiene NullPointerException en Expo Go. NO usar `openDatabaseAsync`, `getAllAsync`, etc. Usar `openDatabaseSync`, `getAllSync`, `getFirstSync`, `execSync`.
-- **Booleans**: Supabase devuelve `true/false`, SQLite necesita `1/0`. La función `esc()` en localDB.ts convierte automáticamente.
+- **Parámetros SQL**: NO usar bind params (`?`) con `getAllSync`/`getFirstSync` — causa NullPointerException. En su lugar, la función `esc()` en localDB.ts escapa los valores y los inyecta directo en el SQL.
+- **Booleans**: Supabase devuelve `true/false`, SQLite necesita `1/0`. La función `esc()` convierte automáticamente.
 - **Paginación Supabase**: máximo 1000 filas por request. Usar cursor `gt('id', lastId)`, NO `range()` con filtros.
 - **Orden almacenes**: custom hardcoded en queries.ts: A11, A20, B80, B77, C26, Almacen 1, Almacen 2
 - Los barcodes se padean a 13 dígitos con `padStart(13, '0')` antes de buscar
 - La app NO crea ni modifica productos, variantes, stock directamente
 - `variantes_cache` existe en Supabase pero NO se usa — le faltan columnas
+- Login va directo a Supabase (no SQLite) — hace trim + lowercase del username
+- **Almacenes color_hex**: la tabla almacenes en Supabase tiene `color_hex`. Si se replica el scanner, agregar esta columna al SQLite local (localDB.ts createTables) y al sync (sync.ts).
+- **Scanner replicable**: ver `Scanner_RedelERP_Instrucciones.txt` en el Escritorio para instrucciones completas de cómo replicar el scanner en esta app. La función `escanearProducto()` en queries.ts ya implementa la lógica central (tallas hermanas, colores disponibles, stock por almacén).
+- **Filtros UX**: usar pills para categoría, subcategoría, género, talla (Casaca→alfabéticas), almacén (con color_hex de BD + textForBg). Selects solo para marca/fit. Ocultar "Unisex" de género.
