@@ -1,9 +1,29 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, ScrollView, Modal } from 'react-native';
-import { Search, X, ChevronDown, ChevronUp, Layers } from 'lucide-react-native';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, ScrollView, Modal, Dimensions } from 'react-native';
+import { Search, X, ChevronDown, ChevronUp } from 'lucide-react-native';
+import Svg, { Rect, Line } from 'react-native-svg';
 import { useQuery } from '@tanstack/react-query';
+import { useLocalSearchParams } from 'expo-router';
 import { fetchVariantesConStock, fetchFilterOptions, fetchAlmacenes, fetchTopMarcasYFits, parseSmartSearch } from '../../lib/queries';
 import { C } from '../../lib/colors';
+
+const SCREEN_W = Dimensions.get('window').width;
+
+type AlmacenInfo = { color_hex?: string; patron?: string; color_secundario?: string };
+
+function StripeBg({ color1, color2, w, h }: { color1: string; color2: string; w: number; h: number }) {
+  const step = 18; const sw = 5;
+  const lines = [];
+  for (let x = -(h + step); x < w + h; x += step)
+    lines.push(<Line key={x} x1={x} y1={0} x2={x + h} y2={h} stroke={color1} strokeWidth={sw} strokeOpacity={0.6} />);
+  return (
+    <Svg width={w} height={h} style={{ position: 'absolute', top: 0, left: 0 }}>
+      <Rect x={0} y={0} width={w} height={h} fill={color2} fillOpacity={0.85} />
+      {lines}
+      <Rect x={0} y={0} width={w} height={h} fill="rgba(0,0,0,0.28)" />
+    </Svg>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────
 
@@ -13,18 +33,15 @@ type Filtros = {
   almacen_id: string; almacen_nombre: string;
 };
 
-type StockAlmacen = { almacen_id: string; almacen_nombre: string; cantidad: number };
-type StockDetail = { total: number; porAlmacen: StockAlmacen[] };
+type StockDetail = { total: number; porAlmacen: { almacen_id: string; almacen_nombre: string; cantidad: number }[] };
 type VarianteTalla = { talla: string; stock: StockDetail; codigo_barras: string; sku_variant: string };
-type ColorGroup = { color_nombre: string; color_id: string; stockTotal: number; variantes: VarianteTalla[]; almacenResumen: StockAlmacen[] };
+type ColorGroup = { color_nombre: string; color_id: string; stockTotal: number; variantes: VarianteTalla[] };
 type ProductGroup = {
   producto_id: string; producto_sku: string; producto_modelo: string;
   marca_nombre: string; fit_nombre: string; categoria_nombre: string;
   subcategoria_nombre: string; genero_nombre: string;
   precio: number; stockTotal: number; colores: ColorGroup[];
 };
-type FitGroup = { fit_nombre: string; stockTotal: number; productos: ProductGroup[] };
-type ListItem = { type: 'fit_header'; fit: FitGroup } | { type: 'product'; prod: ProductGroup };
 
 const EMPTY_FILTROS: Filtros = {
   search: '', categoria: '', subcategoria: '', marca: '', fit: '', genero: '', talla: '',
@@ -47,6 +64,8 @@ const FILTER_LABELS: Record<string, string> = {
 
 const MAX_PILLS = 5;
 
+const PREFERRED_MARCAS = ['Pionier', 'Bronco', 'Metal', 'Lois', 'Norton', 'Vowh', 'Kansas'];
+
 // ─── Grouping ─────────────────────────────────────────
 
 function sortTallas(a: VarianteTalla, b: VarianteTalla) {
@@ -55,14 +74,6 @@ function sortTallas(a: VarianteTalla, b: VarianteTalla) {
   return a.talla.localeCompare(b.talla);
 }
 
-function buildAlmacenResumen(variantes: VarianteTalla[]): StockAlmacen[] {
-  const m = new Map<string, StockAlmacen>();
-  for (const v of variantes) for (const a of v.stock.porAlmacen) {
-    const e = m.get(a.almacen_id);
-    if (e) e.cantidad += a.cantidad; else m.set(a.almacen_id, { ...a });
-  }
-  return Array.from(m.values()).sort((a, b) => b.cantidad - a.cantidad);
-}
 
 function groupByProducto(variantes: any[], stockMap: Map<string, StockDetail>): ProductGroup[] {
   const prodMap = new Map<string, ProductGroup>();
@@ -80,34 +91,18 @@ function groupByProducto(variantes: any[], stockMap: Map<string, StockDetail>): 
     const sd = stockMap.get(v.id) || empty;
     p.stockTotal += sd.total;
     let cg = p.colores.find(c => c.color_id === v.color_id);
-    if (!cg) { cg = { color_nombre: v.color_nombre, color_id: v.color_id, stockTotal: 0, variantes: [], almacenResumen: [] }; p.colores.push(cg); }
+    if (!cg) { cg = { color_nombre: v.color_nombre, color_id: v.color_id, stockTotal: 0, variantes: [] }; p.colores.push(cg); }
     cg.stockTotal += sd.total;
     cg.variantes.push({ talla: v.talla_valor, stock: sd, codigo_barras: v.codigo_barras, sku_variant: v.sku_variant });
   }
 
   for (const p of prodMap.values()) {
-    for (const c of p.colores) { c.variantes.sort(sortTallas); c.almacenResumen = buildAlmacenResumen(c.variantes); }
+    for (const c of p.colores) { c.variantes.sort(sortTallas); }
     p.colores.sort((a, b) => b.stockTotal - a.stockTotal);
   }
   return Array.from(prodMap.values()).sort((a, b) => b.stockTotal - a.stockTotal);
 }
 
-function groupByFit(prods: ProductGroup[]): FitGroup[] {
-  const m = new Map<string, FitGroup>();
-  for (const p of prods) {
-    const k = p.fit_nombre || 'Sin fit';
-    let fg = m.get(k);
-    if (!fg) { fg = { fit_nombre: k, stockTotal: 0, productos: [] }; m.set(k, fg); }
-    fg.stockTotal += p.stockTotal; fg.productos.push(p);
-  }
-  return Array.from(m.values()).sort((a, b) => b.stockTotal - a.stockTotal);
-}
-
-function buildFitList(groups: FitGroup[]): ListItem[] {
-  const items: ListItem[] = [];
-  for (const fg of groups) { items.push({ type: 'fit_header', fit: fg }); for (const p of fg.productos) items.push({ type: 'product', prod: p }); }
-  return items;
-}
 
 // ─── Screen ───────────────────────────────────────────
 
@@ -127,17 +122,31 @@ export default function ConsultasScreen() {
   const [appliedFiltros, setAppliedFiltros] = useState<Filtros | null>(null);
   const [expandedProd, setExpandedProd] = useState<string | null>(null);
   const [modalFilter, setModalFilter] = useState<string | null>(null);
-  const [agruparFit, setAgruparFit] = useState(false);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const searchRef = useRef<TextInput>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const filtrosRef = useRef(filtros);
+  filtrosRef.current = filtros;
+
+  const params = useLocalSearchParams<{ modelo?: string; producto_id?: string }>();
+  useEffect(() => {
+    if (!params.modelo && !params.producto_id) return;
+    if (params.modelo) {
+      const next = { ...EMPTY_FILTROS, search: params.modelo };
+      setFiltros(next);
+      setAppliedFiltros(next);
+    }
+    if (params.producto_id) {
+      setExpandedProd(params.producto_id);
+    }
+  }, [params.modelo, params.producto_id]);
 
   const { data: filterOptions } = useQuery({ queryKey: ['filterOptions'], queryFn: fetchFilterOptions, staleTime: 60000 });
   const { data: almacenes } = useQuery({ queryKey: ['almacenes'], queryFn: fetchAlmacenes, staleTime: 60000 });
 
-  const hasActiveFilters = filtros.categoria || filtros.subcategoria || filtros.marca || filtros.fit || filtros.genero || filtros.talla;
-  const hasApplied = appliedFiltros && (appliedFiltros.search || appliedFiltros.categoria || appliedFiltros.subcategoria || appliedFiltros.marca || appliedFiltros.fit || appliedFiltros.genero || appliedFiltros.talla);
+  const hasActiveFilters = !!(filtros.categoria || filtros.subcategoria || filtros.marca || filtros.fit || filtros.genero);
+  const hasApplied = !!(appliedFiltros && (appliedFiltros.search || appliedFiltros.categoria || appliedFiltros.subcategoria || appliedFiltros.marca || appliedFiltros.fit || appliedFiltros.genero || appliedFiltros.almacen_id));
 
-  // Top marcas/fits cascadas
+  // Top marcas/fits cascadas — habilitado con cualquier filtro contextual
   const { data: topData } = useQuery({
     queryKey: ['topMarcasFits', filtros.categoria, filtros.subcategoria, filtros.genero, filtros.marca],
     queryFn: () => fetchTopMarcasYFits({
@@ -146,7 +155,7 @@ export default function ConsultasScreen() {
       genero: filtros.genero || undefined,
       marca: filtros.marca || undefined,
     }),
-    enabled: !!(filtros.categoria || filtros.subcategoria || filtros.genero),
+    enabled: true,
     staleTime: 60000,
   });
 
@@ -168,17 +177,46 @@ export default function ConsultasScreen() {
 
   const productos = useMemo(() => data ? groupByProducto(data.variantes, data.stockMap) : [], [data]);
   const stockGrandTotal = useMemo(() => productos.reduce((s, p) => s + p.stockTotal, 0), [productos]);
-  const listItems = useMemo<ListItem[]>(() => {
-    if (!agruparFit) return productos.map(p => ({ type: 'product' as const, prod: p }));
-    return buildFitList(groupByFit(productos));
-  }, [productos, agruparFit]);
+
+  const topMarcas = topData?.marcas.slice(0, MAX_PILLS) || [];
+  const topFits   = topData?.fits.slice(0, MAX_PILLS)   || [];
+
+  const displayMarcas = useMemo(() => {
+    const pool: Array<{ nombre: string; count?: number }> = topMarcas.length > 0
+      ? topMarcas
+      : (filterOptions?.marca || []).map(m => ({ nombre: m }));
+    const poolMap = new Map(pool.map(m => [m.nombre.toLowerCase(), m]));
+    const preferred = PREFERRED_MARCAS
+      .map(p => poolMap.get(p.toLowerCase()))
+      .filter((m): m is { nombre: string; count?: number } => !!m);
+    const prefSet = new Set(preferred.map(m => m.nombre.toLowerCase()));
+    const rest = pool
+      .filter(m => !prefSet.has(m.nombre.toLowerCase()))
+      .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
+      .slice(0, 3);
+    return [...preferred, ...rest];
+  }, [topMarcas, filterOptions]);
+
+  const displayFits: Array<{ nombre: string; count?: number }> = topFits.length > 0
+    ? topFits
+    : (filterOptions?.fit || []).slice(0, MAX_PILLS).map(f => ({ nombre: f }));
 
   const applySearch = useCallback((f: Filtros) => {
-    setAppliedFiltros({ ...f }); setExpandedProd(null); setFiltersExpanded(false);
+    setAppliedFiltros({ ...f }); setExpandedProd(null);
+  }, []);
+
+  const onSearchChange = useCallback((v: string) => {
+    setFiltros(prev => ({ ...prev, search: v }));
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (v.trim().length < 2) return;
+    searchTimerRef.current = setTimeout(() => {
+      const next = { ...filtrosRef.current, search: v };
+      setAppliedFiltros(next);
+      setExpandedProd(null);
+    }, 400);
   }, []);
 
   const updateFilter = useCallback((key: string, value: string, autoApply = true) => {
-    if (key === 'fit' && value) setAgruparFit(false);
     setFiltros(prev => {
       const next = { ...prev, [key]: value };
       if (autoApply && key !== 'search') setTimeout(() => applySearch(next), 0);
@@ -187,7 +225,7 @@ export default function ConsultasScreen() {
   }, [applySearch]);
 
   const applyShortcut = useCallback((s: typeof SHORTCUTS[0]) => {
-    const next = { ...EMPTY_FILTROS, categoria: s.categoria, subcategoria: s.subcategoria, genero: s.genero };
+    const next = { ...filtrosRef.current, search: '', categoria: s.categoria, subcategoria: s.subcategoria, genero: s.genero };
     setFiltros(next);
     applySearch(next);
   }, [applySearch]);
@@ -220,21 +258,30 @@ export default function ConsultasScreen() {
   const setAlmacen = useCallback((id: string, nombre: string) => {
     setFiltros(prev => {
       const next = { ...prev, almacen_id: id, almacen_nombre: nombre };
-      if (appliedFiltros) setTimeout(() => applySearch(next), 0);
+      if (appliedFiltros) setTimeout(() => setAppliedFiltros({ ...next }), 0);
       return next;
     });
-  }, [applySearch, appliedFiltros]);
+  }, [appliedFiltros]);
 
   const clearAll = useCallback(() => {
     setFiltros({ ...EMPTY_FILTROS }); setAppliedFiltros(null); setExpandedProd(null);
   }, []);
 
-  const showAlmDesglose = !filtros.almacen_id;
-  const topMarcas = topData?.marcas.slice(0, MAX_PILLS) || [];
-  const topFits = topData?.fits.slice(0, MAX_PILLS) || [];
+  const clearCategoria = useCallback(() => {
+    setFiltros(prev => {
+      const next = { ...prev, categoria: '', subcategoria: '', genero: '' };
+      setTimeout(() => applySearch(next), 0);
+      return next;
+    });
+  }, [applySearch]);
+
+  const activeShortcut = SHORTCUTS.find(s =>
+    s.categoria === filtros.categoria && s.subcategoria === filtros.subcategoria && s.genero === filtros.genero
+  );
+
   const almacenColorMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of (almacenes || [])) if (a.color_hex) m.set(a.id, a.color_hex);
+    const m = new Map<string, AlmacenInfo>();
+    for (const a of (almacenes || [])) m.set(a.id, { color_hex: a.color_hex, patron: a.patron, color_secundario: a.color_secundario });
     return m;
   }, [almacenes]);
 
@@ -247,7 +294,7 @@ export default function ConsultasScreen() {
         {/* Search bar */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TextInput ref={searchRef} value={filtros.search}
-            onChangeText={v => updateFilter('search', v, false)} onSubmitEditing={doSmartSearch}
+            onChangeText={onSearchChange} onSubmitEditing={doSmartSearch}
             placeholder="pionier pitillo 30 o escribe lo que sea..."
             placeholderTextColor={C.textMuted} autoCapitalize="none" returnKeyType="search"
             style={{ flex: 1, backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: C.white, fontSize: 14, borderWidth: 1, borderColor: C.border }} />
@@ -286,126 +333,113 @@ export default function ConsultasScreen() {
           </ScrollView>
         )}
 
-        {/* Chips activos + toggle expandir */}
-        {hasActiveFilters && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }} style={{ flex: 1 }}>
-              {filtros.categoria ? <PillChip label={filtros.categoria} color={C.accent} onRemove={() => updateFilter('categoria', '')} /> : null}
-              {filtros.subcategoria ? <PillChip label={filtros.subcategoria} color={C.accent} onRemove={() => updateFilter('subcategoria', '')} /> : null}
-              {filtros.genero ? <PillChip label={filtros.genero} color={C.accent} onRemove={() => updateFilter('genero', '')} /> : null}
-              {filtros.marca ? <PillChip label={filtros.marca} color={C.blue} onRemove={() => updateFilter('marca', '')} /> : null}
-              {filtros.fit ? <PillChip label={filtros.fit} color={C.violet} onRemove={() => updateFilter('fit', '')} /> : null}
-              {filtros.talla ? <PillChip label={`T${filtros.talla}`} color={C.cyan} onRemove={() => updateFilter('talla', '')} /> : null}
-            </ScrollView>
+        {/* Shortcuts compactos — visibles cuando hay filtros activos */}
+        {(hasActiveFilters || hasApplied) && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }}>
+            {SHORTCUTS.map(s => {
+              const isActive = filtros.categoria === s.categoria && filtros.subcategoria === s.subcategoria && filtros.genero === s.genero;
+              return (
+                <Pressable key={s.label}
+                  onPress={() => isActive ? clearCategoria() : applyShortcut(s)}
+                  style={{ backgroundColor: isActive ? C.accent : C.card, borderRadius: 8,
+                    paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1,
+                    borderColor: isActive ? C.accent : C.border }}>
+                  <Text style={{ color: isActive ? C.white : C.textSecondary, fontSize: 11, fontWeight: '600' }}>{s.label}</Text>
+                </Pressable>
+              );
+            })}
             <Pressable onPress={clearAll}
-              style={{ backgroundColor: C.redSurface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.red }}>
+              style={{ backgroundColor: C.redSurface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+                borderWidth: 1, borderColor: C.red, justifyContent: 'center' }}>
               <Text style={{ color: C.red, fontSize: 11, fontWeight: '700' }}>Limpiar</Text>
             </Pressable>
-            <Pressable onPress={() => setFiltersExpanded(v => !v)}
-              style={{ backgroundColor: filtersExpanded ? C.accentSurface : C.card, borderRadius: 8, padding: 6, borderWidth: 1, borderColor: filtersExpanded ? C.accent : C.border }}>
-              {filtersExpanded ? <ChevronUp size={16} color={C.accent} /> : <ChevronDown size={16} color={C.textMuted} />}
-            </Pressable>
-          </View>
+          </ScrollView>
         )}
 
-        {/* Filtros expandidos (cascade + marca/fit/talla) */}
-        {filtersExpanded && hasActiveFilters && filterOptions && (
-          <View style={{ gap: 8, paddingTop: 2 }}>
-            {filtros.categoria && !filtros.subcategoria && (
-              <InlinePickerRow label="SUBCATEGORÍA" color={C.accent}
-                options={filterOptions.subcategoria} onSelect={v => updateFilter('subcategoria', v)}
-                onShowAll={() => setModalFilter('subcategoria')} />
-            )}
-            {filtros.categoria && filtros.subcategoria && !filtros.genero && (
-              <InlinePickerRow label="GÉNERO" color={C.accent}
-                options={filterOptions.genero} onSelect={v => updateFilter('genero', v)}
-                onShowAll={() => setModalFilter('genero')} />
-            )}
-            {!filtros.marca && topMarcas.length > 0 && (
-              <View style={{ gap: 5 }}>
-                <Text style={{ color: C.blue, fontSize: 11, fontWeight: '800' }}>MARCA</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                  {topMarcas.map(m => (
+        {/* Marca — siempre visible */}
+        {filterOptions && (
+          <View style={{ gap: 4 }}>
+            <Text style={{ color: C.blue, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>MARCA</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+              {filtros.marca ? (
+                <Pressable onPress={() => updateFilter('marca', '')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.blue, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 }}>
+                  <Text style={{ color: C.white, fontSize: 13, fontWeight: '800' }}>{filtros.marca}</Text>
+                  <X size={13} color={C.white} />
+                </Pressable>
+              ) : (
+                <>
+                  {displayMarcas.map(m => (
                     <Pressable key={m.nombre} onPress={() => updateFilter('marca', m.nombre)}
                       style={{ backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: C.blue + '40' }}>
                       <Text style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700' }}>{m.nombre}</Text>
-                      <Text style={{ color: C.textMuted, fontSize: 9 }}>{m.count} modelos</Text>
+                      {m.count != null && <Text style={{ color: C.textMuted, fontSize: 9 }}>{m.count} modelos</Text>}
                     </Pressable>
                   ))}
                   <Pressable onPress={() => setModalFilter('marca')}
                     style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.blue, justifyContent: 'center' }}>
                     <Text style={{ color: C.blue, fontSize: 12, fontWeight: '700' }}>Ver todo</Text>
                   </Pressable>
-                </ScrollView>
-              </View>
-            )}
-            {!filtros.fit && topFits.length > 0 && (
-              <View style={{ gap: 5 }}>
-                <Text style={{ color: C.violet, fontSize: 11, fontWeight: '800' }}>FIT</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                  {topFits.map(f => (
+                </>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Fit — siempre visible, inteligente según contexto */}
+        {filterOptions && (
+          <View style={{ gap: 4 }}>
+            <Text style={{ color: C.violet, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>FIT</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+              {filtros.fit ? (
+                <Pressable onPress={() => updateFilter('fit', '')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.violet, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 }}>
+                  <Text style={{ color: C.white, fontSize: 13, fontWeight: '800' }}>{filtros.fit}</Text>
+                  <X size={13} color={C.white} />
+                </Pressable>
+              ) : (
+                <>
+                  {displayFits.map(f => (
                     <Pressable key={f.nombre} onPress={() => updateFilter('fit', f.nombre)}
                       style={{ backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: C.violet + '40' }}>
                       <Text style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700' }}>{f.nombre}</Text>
-                      <Text style={{ color: C.textMuted, fontSize: 9 }}>{f.count} modelos</Text>
+                      {f.count != null && <Text style={{ color: C.textMuted, fontSize: 9 }}>{f.count} modelos</Text>}
                     </Pressable>
                   ))}
                   <Pressable onPress={() => setModalFilter('fit')}
                     style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.violet, justifyContent: 'center' }}>
                     <Text style={{ color: C.violet, fontSize: 12, fontWeight: '700' }}>Ver todo</Text>
                   </Pressable>
-                </ScrollView>
-              </View>
-            )}
-            {(() => {
-              const cat = filtros.categoria?.toLowerCase() || '';
-              const usarNumericas = cat === 'pantalon' || cat === 'bermuda';
-              const usarAlfanumericas = cat === 'casaca';
-              const tallaPrimaria = usarNumericas ? (filterOptions as any).tallasNumericas
-                : usarAlfanumericas ? (filterOptions as any).tallasAlfanumericas
-                : filterOptions.talla;
-              const tallaSecundaria = usarNumericas ? (filterOptions as any).tallasAlfanumericas
-                : usarAlfanumericas ? (filterOptions as any).tallasNumericas : null;
-              return (
-                <View style={{ gap: 5 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={{ color: C.cyan, fontSize: 11, fontWeight: '800' }}>TALLA</Text>
-                    {filtros.talla && (
-                      <Pressable onPress={() => updateFilter('talla', '')} style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                        <Text style={{ color: C.textMuted, fontSize: 10 }}>Cambiar</Text>
-                        <X size={11} color={C.textMuted} />
-                      </Pressable>
-                    )}
-                  </View>
-                  {!filtros.talla ? (
-                    <View style={{ gap: 5 }}>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }}>
-                        {(tallaPrimaria || []).map((t: string) => (
-                          <Pressable key={t} onPress={() => updateFilter('talla', t)}
-                            style={{ backgroundColor: C.card, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.cyan + '40', minWidth: 40, alignItems: 'center' }}>
-                            <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700' }}>{t}</Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                      {tallaSecundaria && tallaSecundaria.length > 0 && (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }}>
-                          {tallaSecundaria.map((t: string) => (
-                            <Pressable key={t} onPress={() => updateFilter('talla', t)}
-                              style={{ backgroundColor: C.card, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border, minWidth: 40, alignItems: 'center' }}>
-                              <Text style={{ color: C.textMuted, fontSize: 13, fontWeight: '600' }}>{t}</Text>
-                            </Pressable>
-                          ))}
-                        </ScrollView>
-                      )}
-                    </View>
-                  ) : (
-                    <View style={{ backgroundColor: C.cyanSurface, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: C.cyan, alignSelf: 'flex-start' }}>
-                      <Text style={{ color: C.cyan, fontSize: 16, fontWeight: '800' }}>{filtros.talla}</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })()}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Cascade subcategoría / género */}
+        {filterOptions && filtros.categoria && !filtros.subcategoria && (
+          <InlinePickerRow label="SUBCATEGORÍA" color={C.accent}
+            options={filterOptions.subcategoria} onSelect={v => updateFilter('subcategoria', v)}
+            onShowAll={() => setModalFilter('subcategoria')} />
+        )}
+        {filterOptions && filtros.categoria && filtros.subcategoria && !filtros.genero && (
+          <InlinePickerRow label="GÉNERO" color={C.accent}
+            options={filterOptions.genero} onSelect={v => updateFilter('genero', v)}
+            onShowAll={() => setModalFilter('genero')} />
+        )}
+
+        {/* Chips activos — solo cuando no hay shortcut estándar activo */}
+        {!activeShortcut && (filtros.categoria || filtros.subcategoria || filtros.genero) && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }} style={{ flex: 1 }}>
+              {filtros.categoria ? <PillChip label={filtros.categoria} color={C.accent} onRemove={() => updateFilter('categoria', '')} /> : null}
+              {filtros.subcategoria ? <PillChip label={filtros.subcategoria} color={C.accent} onRemove={() => updateFilter('subcategoria', '')} /> : null}
+              {filtros.genero ? <PillChip label={filtros.genero} color={C.accent} onRemove={() => updateFilter('genero', '')} /> : null}
+            </ScrollView>
+            <Pressable onPress={clearAll}
+              style={{ backgroundColor: C.redSurface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.red }}>
+              <Text style={{ color: C.red, fontSize: 11, fontWeight: '700' }}>Limpiar</Text>
+            </Pressable>
           </View>
         )}
       </View>
@@ -433,8 +467,8 @@ export default function ConsultasScreen() {
       {isLoading ? (
         <View style={{ padding: 40, alignItems: 'center', flex: 1 }}><ActivityIndicator color={C.accent} size="large" /></View>
       ) : hasApplied ? (
-        <FlatList data={listItems} style={{ flex: 1 }}
-          keyExtractor={(item) => item.type === 'fit_header' ? `fit-${item.fit.fit_nombre}` : item.prod.producto_id}
+        <FlatList data={productos} style={{ flex: 1 }}
+          keyExtractor={(p) => p.producto_id}
           contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 24 }}
           ListHeaderComponent={productos.length > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
@@ -442,33 +476,14 @@ export default function ConsultasScreen() {
               <Text style={{ color: C.textMuted, fontSize: 11, flex: 1 }}>
                 prendas · {productos.length} modelo{productos.length !== 1 ? 's' : ''}
               </Text>
-              {!filtros.fit && (
-                <Pressable onPress={() => setAgruparFit(!agruparFit)}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
-                    backgroundColor: agruparFit ? C.violetSurface : C.card, borderWidth: 1, borderColor: agruparFit ? C.violet : C.border }}>
-                  <Layers size={11} color={agruparFit ? C.violet : C.textMuted} />
-                  <Text style={{ color: agruparFit ? C.violet : C.textMuted, fontSize: 10, fontWeight: '600' }}>{agruparFit ? 'Por Fit' : 'Agrupar'}</Text>
-                </Pressable>
-              )}
-              <Pressable onPress={clearAll}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: C.card, borderWidth: 1, borderColor: C.border }}>
-                <Search size={11} color={C.textMuted} />
-                <Text style={{ color: C.textMuted, fontSize: 10, fontWeight: '600' }}>Nueva</Text>
-              </Pressable>
             </View>
           ) : null}
           ListEmptyComponent={<Text style={{ color: C.textMuted, fontSize: 14, textAlign: 'center', paddingTop: 40 }}>Sin resultados</Text>}
-          renderItem={({ item }) => {
-            if (item.type === 'fit_header') return (
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, paddingHorizontal: 4, marginTop: 6, marginBottom: 4, borderBottomWidth: 1, borderBottomColor: C.violet }}>
-                <Text style={{ color: C.violet, fontSize: 14, fontWeight: '800' }}>{item.fit.fit_nombre}</Text>
-                <Text style={{ color: C.violet, fontSize: 16, fontWeight: '800' }}>{item.fit.stockTotal}</Text>
-              </View>
-            );
-            return <ProductCard prod={item.prod} isExpanded={expandedProd === item.prod.producto_id} showAlmDesglose={showAlmDesglose}
+          renderItem={({ item }) => (
+            <ProductCard prod={item} isExpanded={expandedProd === item.producto_id}
               almacenColorMap={almacenColorMap}
-              onToggle={() => setExpandedProd(expandedProd === item.prod.producto_id ? null : item.prod.producto_id)} />;
-          }}
+              onToggle={() => setExpandedProd(expandedProd === item.producto_id ? null : item.producto_id)} />
+          )}
         />
       ) : null}
 
@@ -521,17 +536,148 @@ function PillChip({ label, color, onRemove }: { label: string; color: string; on
   );
 }
 
-// ─── Product Card ─────────────────────────────────────
+// ─── Stock Matrix ─────────────────────────────────────
 
-function ProductCard({ prod, isExpanded, showAlmDesglose, almacenColorMap, onToggle }: {
-  prod: ProductGroup; isExpanded: boolean; showAlmDesglose: boolean;
-  almacenColorMap: Map<string, string>; onToggle: () => void;
+const CELL_W = 36;
+const COLOR_COL_W = 90;
+const TOTAL_COL_W = 36;
+const ROW_H = 32;
+const HEADER_H = 22;
+
+function sortTallasRaw(tallas: string[]): string[] {
+  return [...tallas].sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    if (!isNaN(na)) return -1;
+    if (!isNaN(nb)) return 1;
+    return a.localeCompare(b);
+  });
+}
+
+function StockMatrix({ colores, almacenColorMap }: {
+  colores: ColorGroup[]; almacenColorMap: Map<string, AlmacenInfo>;
 }) {
-  const [selectedTalla, setSelectedTalla] = useState<string | null>(null);
+  const [selectedCell, setSelectedCell] = useState<{ color_id: string; talla: string } | null>(null);
+
+  const allTallas = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of colores) for (const v of c.variantes) set.add(v.talla);
+    return sortTallasRaw([...set]);
+  }, [colores]);
+
+  const selColor = selectedCell ? colores.find(c => c.color_id === selectedCell.color_id) : null;
+  const selVariant = selColor ? selColor.variantes.find(v => v.talla === selectedCell!.talla) : null;
 
   return (
+    <View style={{ paddingHorizontal: 10, paddingBottom: 14, gap: 8 }}>
+      <View style={{ flexDirection: 'row' }}>
+
+        {/* Columna fija izquierda: nombres de color */}
+        <View style={{ width: COLOR_COL_W }}>
+          <View style={{ height: HEADER_H }} />
+          {colores.map(c => (
+            <View key={c.color_id} style={{ height: ROW_H, justifyContent: 'center', paddingRight: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3,
+                  backgroundColor: c.stockTotal > 0 ? C.indigo : C.border, flexShrink: 0 }} />
+                <Text numberOfLines={1} style={{ color: c.stockTotal > 0 ? C.textPrimary : C.textMuted,
+                  fontSize: 11, fontWeight: '600', flex: 1 }}>{c.color_nombre}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* Zona scrollable: tallas + total */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+          <View>
+            {/* Header tallas */}
+            <View style={{ flexDirection: 'row', height: HEADER_H, alignItems: 'center' }}>
+              {allTallas.map(t => (
+                <View key={t} style={{ width: CELL_W, alignItems: 'center' }}>
+                  <Text style={{ color: C.textMuted, fontSize: 9, fontWeight: '800' }}>{t}</Text>
+                </View>
+              ))}
+              <View style={{ width: TOTAL_COL_W, alignItems: 'center', marginLeft: 4 }}>
+                <Text style={{ color: C.textMuted, fontSize: 9, fontWeight: '800' }}>TOT</Text>
+              </View>
+            </View>
+
+            {/* Filas de color */}
+            {colores.map(c => {
+              const varMap = new Map(c.variantes.map(v => [v.talla, v]));
+              return (
+                <View key={c.color_id} style={{ flexDirection: 'row', height: ROW_H, alignItems: 'center' }}>
+                  {allTallas.map(t => {
+                    const v = varMap.get(t);
+                    const qty = v?.stock.total ?? 0;
+                    const isSel = selectedCell?.color_id === c.color_id && selectedCell?.talla === t;
+                    return (
+                      <Pressable key={t}
+                        onPress={() => qty > 0 ? setSelectedCell(isSel ? null : { color_id: c.color_id, talla: t }) : null}
+                        style={{ width: CELL_W, height: 28, alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: isSel ? C.indigo : qty > 0 ? C.accentSurface : 'transparent',
+                          borderRadius: 6 }}>
+                        <Text style={{ color: isSel ? C.white : qty > 0 ? C.cyan : C.border,
+                          fontSize: 12, fontWeight: qty > 0 ? '800' : '400' }}>
+                          {qty > 0 ? qty : '·'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                  <View style={{ width: TOTAL_COL_W, alignItems: 'center', marginLeft: 4 }}>
+                    <Text style={{ color: c.stockTotal > 0 ? C.textPrimary : C.textMuted,
+                      fontSize: 12, fontWeight: '900' }}>{c.stockTotal}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* Detalle almacén de celda seleccionada */}
+      {selVariant && selColor && (
+        <View style={{ backgroundColor: C.bg, borderRadius: 10, padding: 10, gap: 6,
+          borderWidth: 1, borderColor: C.indigo + '50' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <Text style={{ color: C.textPrimary, fontSize: 12, fontWeight: '700' }}>
+              {selColor.color_nombre} · T{selectedCell!.talla}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ color: C.textMuted, fontSize: 9 }}>{selVariant.codigo_barras}</Text>
+              <Text style={{ color: C.cyan, fontSize: 16, fontWeight: '900' }}>{selVariant.stock.total}</Text>
+            </View>
+          </View>
+          {selVariant.stock.porAlmacen.map(a => {
+            const almInfo = almacenColorMap.get(a.almacen_id);
+            const isStripe = almInfo?.patron === 'rayas' && !!almInfo?.color_secundario;
+            const bg = isStripe ? 'transparent' : (almInfo?.color_hex || C.card);
+            const tc = isStripe ? '#ffffff' : (almInfo?.color_hex ? textForBgC(almInfo.color_hex) : C.textSecondary);
+            return (
+              <View key={a.almacen_id} style={{ flexDirection: 'row', justifyContent: 'space-between',
+                alignItems: 'center', backgroundColor: bg, borderRadius: 7,
+                paddingHorizontal: 10, paddingVertical: 7, overflow: 'hidden', minHeight: 34 }}>
+                {isStripe && <StripeBg color1={almInfo!.color_hex!} color2={almInfo!.color_secundario!} w={SCREEN_W} h={34} />}
+                <Text style={{ color: tc, fontSize: 12, fontWeight: '700', zIndex: 1 }}>{a.almacen_nombre}</Text>
+                <Text style={{ color: tc, fontSize: 15, fontWeight: '900', zIndex: 1 }}>{a.cantidad}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── Product Card ─────────────────────────────────────
+
+function ProductCard({ prod, isExpanded, almacenColorMap, onToggle }: {
+  prod: ProductGroup; isExpanded: boolean;
+  almacenColorMap: Map<string, AlmacenInfo>; onToggle: () => void;
+}) {
+  return (
     <View style={{ backgroundColor: C.card, borderRadius: 14, marginBottom: 8, overflow: 'hidden', borderWidth: 1, borderColor: C.border }}>
-      <Pressable onPress={() => { onToggle(); setSelectedTalla(null); }} style={{ padding: 14 }}>
+      <Pressable onPress={onToggle} style={{ padding: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: C.textPrimary, fontSize: 17, fontWeight: '800', lineHeight: 22 }}>{prod.producto_modelo}</Text>
@@ -550,7 +696,8 @@ function ProductCard({ prod, isExpanded, showAlmDesglose, almacenColorMap, onTog
         {!isExpanded && (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
             {prod.colores.map(c => (
-              <View key={c.color_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.bg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+              <View key={c.color_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
+                backgroundColor: C.bg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
                 <Text style={{ color: C.textSecondary, fontSize: 11 }}>{c.color_nombre}</Text>
                 <Text style={{ color: c.stockTotal > 0 ? C.cyan : C.red, fontSize: 12, fontWeight: '800' }}>{c.stockTotal}</Text>
               </View>
@@ -560,91 +707,7 @@ function ProductCard({ prod, isExpanded, showAlmDesglose, almacenColorMap, onTog
       </Pressable>
 
       {isExpanded && (
-        <View style={{ paddingHorizontal: 12, paddingBottom: 14, gap: 10 }}>
-          {prod.colores.map(color => {
-            const selV = selectedTalla ? color.variantes.find(v => v.sku_variant === selectedTalla) : null;
-            return (
-              <View key={color.color_id} style={{ backgroundColor: C.bg, borderRadius: 12, padding: 12, gap: 10 }}>
-                {/* Color header */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color.stockTotal > 0 ? C.indigo : C.textMuted }} />
-                  <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700', flex: 1 }}>{color.color_nombre}</Text>
-                  <Text style={{ color: color.stockTotal > 0 ? C.cyan : C.red, fontSize: 18, fontWeight: '900' }}>{color.stockTotal}</Text>
-                </View>
-
-                {/* Tallas */}
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {color.variantes.map(v => {
-                    const isSel = selectedTalla === v.sku_variant;
-                    return (
-                      <Pressable key={v.sku_variant} onPress={() => setSelectedTalla(isSel ? null : v.sku_variant)}
-                        style={{
-                          backgroundColor: isSel ? C.indigo : C.card, borderRadius: 10,
-                          alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, minWidth: 52,
-                          borderWidth: 2, borderColor: isSel ? C.indigo : (v.stock.total > 0 ? C.cyan + '50' : C.red + '40'),
-                        }}>
-                        <Text style={{ color: isSel ? C.white : C.textSecondary, fontSize: 12, fontWeight: '700' }}>{v.talla}</Text>
-                        <Text style={{ color: isSel ? C.white : (v.stock.total > 0 ? C.cyan : C.red), fontSize: 18, fontWeight: '900' }}>{v.stock.total}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                {/* Detalle talla seleccionada */}
-                {selV && (
-                  <View style={{ backgroundColor: C.card, borderRadius: 10, padding: 12, gap: 8, borderWidth: 1, borderColor: C.indigo + '60' }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700' }}>{color.color_nombre} · T{selV.talla}</Text>
-                      <Text style={{ color: selV.stock.total > 0 ? C.cyan : C.red, fontSize: 20, fontWeight: '900' }}>{selV.stock.total}</Text>
-                    </View>
-                    <Text style={{ color: C.textMuted, fontSize: 10 }}>{selV.codigo_barras}</Text>
-                    {selV.stock.porAlmacen.length > 0 ? (
-                      <View style={{ gap: 6 }}>
-                        <Text style={{ color: C.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>UBICACIÓN</Text>
-                        {selV.stock.porAlmacen.map(a => {
-                          const hex = almacenColorMap.get(a.almacen_id);
-                          const bg = hex || C.bg;
-                          const tc = hex ? textForBgC(hex) : C.textSecondary;
-                          return (
-                            <View key={a.almacen_id} style={{
-                              flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                              backgroundColor: bg, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
-                            }}>
-                              <Text style={{ color: tc, fontSize: 13, fontWeight: '700' }}>{a.almacen_nombre}</Text>
-                              <Text style={{ color: tc, fontSize: 18, fontWeight: '900' }}>{a.cantidad}</Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    ) : <Text style={{ color: C.textMuted, fontSize: 11 }}>Sin stock en esta talla</Text>}
-                  </View>
-                )}
-
-                {/* Resumen almacenes (sin talla seleccionada) */}
-                {!selV && showAlmDesglose && color.almacenResumen.length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
-                    {color.almacenResumen.map(a => {
-                      const hex = almacenColorMap.get(a.almacen_id);
-                      const bg = hex ? hex + '30' : C.card;
-                      const tc = hex || C.cyan;
-                      return (
-                        <View key={a.almacen_id} style={{
-                          flexDirection: 'row', alignItems: 'center', gap: 5,
-                          backgroundColor: bg, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5,
-                          borderWidth: 1, borderColor: tc + '40',
-                        }}>
-                          {hex && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: hex }} />}
-                          <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '600' }}>{a.almacen_nombre}</Text>
-                          <Text style={{ color: C.cyan, fontSize: 12, fontWeight: '800' }}>{a.cantidad}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
+        <StockMatrix colores={prod.colores} almacenColorMap={almacenColorMap} />
       )}
     </View>
   );

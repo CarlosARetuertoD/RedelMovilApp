@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { railwayPost } from './railway';
 import { queryAll, queryFirst } from './localDB';
 import type { ProductoEscaneado } from './types';
 
@@ -91,7 +91,7 @@ export async function escanearProducto(codigoBarras: string): Promise<ProductoEs
   const stocks = await queryAll('SELECT almacen_id, cantidad FROM stock WHERE variante_id = ? AND cantidad > 0', [variante.id]);
   const stockPorAlmacen = stocks.map((s: any) => {
     const alm: any = cats.almacenMap.get(s.almacen_id);
-    return { almacen_id: s.almacen_id, almacen_nombre: alm?.nombre || '?', almacen_codigo: alm?.codigo || '?', cantidad: s.cantidad, color_hex: alm?.color_hex || null };
+    return { almacen_id: s.almacen_id, almacen_nombre: alm?.nombre || '?', almacen_codigo: alm?.codigo || '?', cantidad: s.cantidad, color_hex: alm?.color_hex || null, patron: alm?.patron || 'solido', color_secundario: alm?.color_secundario || null };
   }).sort((a: any, b: any) => b.cantidad - a.cantidad);
   const stockTotal = stockPorAlmacen.reduce((sum: number, s: any) => sum + s.cantidad, 0);
 
@@ -296,9 +296,9 @@ export async function fetchVariantesConStock(filtros: {
     if (!ids.length) return emptyResult;
     prodWhere += ` AND genero_id IN (${ids.map(() => '?').join(',')})`; prodParams.push(...ids);
   }
-  if (filtros.search) {
-    prodWhere += ' AND (modelo LIKE ? OR sku_product LIKE ?)';
-    prodParams.push(`%${filtros.search}%`, `%${filtros.search}%`);
+  if (filtros.search && filtros.search.trim().length >= 2) {
+    prodWhere += ' AND modelo LIKE ?';
+    prodParams.push(`%${filtros.search}%`);
   }
 
   // Get producto IDs
@@ -341,8 +341,8 @@ export async function fetchVariantesConStock(filtros: {
     varWhere += ` AND v.producto_id IN (${prodIds.map(() => '?').join(',')})`;
     varParams.push(...prodIds);
   } else if (filtros.search) {
-    varWhere += ' AND (v.sku_variant LIKE ? OR v.codigo_barras LIKE ?)';
-    varParams.push(`%${filtros.search}%`, `%${filtros.search}%`);
+    varWhere += ' AND v.codigo_barras LIKE ?';
+    varParams.push(`%${filtros.search}%`);
   } else {
     return emptyResult;
   }
@@ -360,11 +360,11 @@ export async function fetchVariantesConStock(filtros: {
   let rawVariantes = await queryAll(`SELECT v.* FROM variantes v WHERE ${varWhere} ORDER BY v.sku_variant LIMIT ?`, [...varParams, limit]);
   console.log('[fetchVariantesConStock] rawVariantes:', rawVariantes.length);
 
-  // If search, also find by sku/barcode and merge
+  // If search, also find by barcode and merge
   if (filtros.search && prodIds.length > 0) {
     const skuVars = await queryAll(
-      'SELECT * FROM variantes WHERE activo = 1 AND (sku_variant LIKE ? OR codigo_barras LIKE ?) LIMIT ?',
-      [`%${filtros.search}%`, `%${filtros.search}%`, limit]
+      'SELECT * FROM variantes WHERE activo = 1 AND codigo_barras LIKE ? LIMIT ?',
+      [`%${filtros.search}%`, limit]
     );
     const seen = new Set(rawVariantes.map((v: any) => v.id));
     for (const v of skuVars) { if (!seen.has(v.id)) { rawVariantes.push(v); seen.add(v.id); } }
@@ -386,11 +386,10 @@ export async function fetchVariantesConStock(filtros: {
   return buildStockResult(variantes, filtros.almacen_id, cats);
 }
 
-// ─── Solicitudes (sigue yendo a Supabase) ─────────────
+// ─── Solicitudes ──────────────────────────────────────
 
 export async function crearSolicitud(tipo: string, usuario_id: number, usuario_nombre: string, datos: any) {
-  const { error } = await supabase.from('solicitudes_movil').insert({
+  await railwayPost('/api/movil/solicitud/', {
     tipo, usuario_id, usuario_nombre, app_origen: 'redel_movil', estado: 'pendiente', datos,
   });
-  if (error) throw error;
 }

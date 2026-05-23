@@ -140,46 +140,6 @@ export default function PerfilScreen() {
         </View>
       </View>
 
-      {/* Scanner config */}
-      <View style={{ backgroundColor: C.card, borderRadius: 14, padding: 16, gap: 14 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <ScanBarcode size={18} color={C.indigo} />
-          <Text style={{ color: C.white, fontSize: 16, fontWeight: '700' }}>Escáner</Text>
-        </View>
-
-        <View style={{ gap: 8 }}>
-          <Pressable onPress={() => setScannerMode('ambos')}
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12,
-              backgroundColor: scannerMode === 'ambos' ? C.indigoSurface : C.bg,
-              borderRadius: 10, borderWidth: 1, borderColor: scannerMode === 'ambos' ? C.indigo : C.border,
-            }}>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <Camera size={16} color={scannerMode === 'ambos' ? C.indigo : C.textMuted} />
-              <ScanBarcode size={16} color={scannerMode === 'ambos' ? C.indigo : C.textMuted} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: scannerMode === 'ambos' ? C.white : C.textPrimary, fontSize: 13, fontWeight: '700' }}>Cámara + Pistola láser</Text>
-              <Text style={{ color: C.textMuted, fontSize: 11 }}>Buscar manual, cámara y pistola USB</Text>
-            </View>
-            {scannerMode === 'ambos' && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.indigo }} />}
-          </Pressable>
-
-          <Pressable onPress={() => setScannerMode('solo_camara')}
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12,
-              backgroundColor: scannerMode === 'solo_camara' ? C.indigoSurface : C.bg,
-              borderRadius: 10, borderWidth: 1, borderColor: scannerMode === 'solo_camara' ? C.indigo : C.border,
-            }}>
-            <Camera size={16} color={scannerMode === 'solo_camara' ? C.indigo : C.textMuted} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: scannerMode === 'solo_camara' ? C.white : C.textPrimary, fontSize: 13, fontWeight: '700' }}>Solo cámara</Text>
-              <Text style={{ color: C.textMuted, fontSize: 11 }}>Sin buscador manual, solo cámara</Text>
-            </View>
-            {scannerMode === 'solo_camara' && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.indigo }} />}
-          </Pressable>
-        </View>
-      </View>
 
       {/* Logout */}
       <Pressable onPress={handleLogout}

@@ -21,7 +21,7 @@ function createTables(db: SQLiteDatabase) {
     CREATE TABLE IF NOT EXISTS categorias (id TEXT PRIMARY KEY, valor TEXT, sku_code TEXT, activo INTEGER, updated_at TEXT);
     CREATE TABLE IF NOT EXISTS subcategorias (id TEXT PRIMARY KEY, valor TEXT, categoria_id TEXT, activo INTEGER, updated_at TEXT);
     CREATE TABLE IF NOT EXISTS generos (id TEXT PRIMARY KEY, valor TEXT, sku_code TEXT, activo INTEGER, updated_at TEXT);
-    CREATE TABLE IF NOT EXISTS almacenes (id TEXT PRIMARY KEY, nombre TEXT, codigo TEXT, color_hex TEXT, activo INTEGER, updated_at TEXT);
+    CREATE TABLE IF NOT EXISTS almacenes (id TEXT PRIMARY KEY, nombre TEXT, codigo TEXT, color_hex TEXT, patron TEXT, color_secundario TEXT, activo INTEGER, updated_at TEXT);
     CREATE TABLE IF NOT EXISTS productos (id TEXT PRIMARY KEY, sku_product TEXT, modelo TEXT, categoria_id TEXT, subcategoria_id TEXT, marca_id TEXT, fit_id TEXT, genero_id TEXT, precio REAL, activo INTEGER, updated_at TEXT);
     CREATE TABLE IF NOT EXISTS variantes (id TEXT PRIMARY KEY, sku_variant TEXT, codigo_barras TEXT, producto_id TEXT, color_id TEXT, talla_id TEXT, precio REAL, activo INTEGER, updated_at TEXT);
     CREATE TABLE IF NOT EXISTS stock (id TEXT PRIMARY KEY, variante_id TEXT, almacen_id TEXT, cantidad INTEGER, updated_at TEXT);
@@ -36,12 +36,11 @@ function createTables(db: SQLiteDatabase) {
 }
 
 function runMigrations(db: SQLiteDatabase) {
-  // Agrega color_hex a almacenes si no existe (migración para bases de datos previas)
   const cols = db.getAllSync<{ name: string }>('PRAGMA table_info(almacenes)');
-  const hasColorHex = cols.some(c => c.name === 'color_hex');
-  if (!hasColorHex) {
-    db.execSync('ALTER TABLE almacenes ADD COLUMN color_hex TEXT');
-  }
+  const has = (name: string) => cols.some(c => c.name === name);
+  if (!has('color_hex'))        db.execSync('ALTER TABLE almacenes ADD COLUMN color_hex TEXT');
+  if (!has('patron'))           db.execSync('ALTER TABLE almacenes ADD COLUMN patron TEXT');
+  if (!has('color_secundario')) db.execSync('ALTER TABLE almacenes ADD COLUMN color_secundario TEXT');
 }
 
 // ─── SQL escape ───────────────────────────────────────

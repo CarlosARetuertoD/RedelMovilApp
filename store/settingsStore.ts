@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-type ScannerMode = 'ambos' | 'solo_camara';
+type ScannerMode = 'solo_camara';
 
 type SettingsState = {
   scannerMode: ScannerMode;
@@ -13,7 +13,7 @@ type SettingsState = {
 const STORAGE_KEY = '@redelmovil_settings';
 
 const useSettingsStore = create<SettingsState>((set) => ({
-  scannerMode: 'ambos',
+  scannerMode: 'solo_camara',
   ready: false,
 
   init: async () => {
@@ -22,7 +22,7 @@ const useSettingsStore = create<SettingsState>((set) => ({
       if (json) {
         const data = JSON.parse(json);
         // Si hay un valor guardado explícitamente, úsalo; si no, default ambos
-        set({ scannerMode: data.scannerMode ?? 'ambos', ready: true });
+        set({ scannerMode: data.scannerMode ?? 'solo_camara', ready: true });
         return;
       }
     } catch {}

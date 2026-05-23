@@ -1,26 +1,23 @@
-import { supabase } from './supabase';
-import { upsertRows, getLastSync, setLastSync, getRowCount, queryAll } from './localDB';
+import { railwayGet } from './railway';
+import { upsertRows, getLastSync, setLastSync, getRowCount } from './localDB';
 
 type SyncTable = {
   name: string;
   columns: string[];
-  pageSize: number;
-  filter?: (q: any) => any; // filtro extra para la tabla
 };
 
 const TABLES: SyncTable[] = [
-  { name: 'marcas', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'fits', columns: ['id', 'valor', 'sku_code', 'subcategoria_id', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'colores', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'tallas', columns: ['id', 'valor', 'sku_code', 'tipo_talla_id', 'orden', 'updated_at'], pageSize: 500 },
-  { name: 'categorias', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'subcategorias', columns: ['id', 'valor', 'categoria_id', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'generos', columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'almacenes', columns: ['id', 'nombre', 'codigo', 'color_hex', 'activo', 'updated_at'], pageSize: 500 },
-  { name: 'productos', columns: ['id', 'sku_product', 'modelo', 'categoria_id', 'subcategoria_id', 'marca_id', 'fit_id', 'genero_id', 'precio', 'activo', 'updated_at'], pageSize: 900 },
-  { name: 'variantes', columns: ['id', 'sku_variant', 'codigo_barras', 'producto_id', 'color_id', 'talla_id', 'precio', 'activo', 'updated_at'], pageSize: 900 },
-  { name: 'stock', columns: ['id', 'variante_id', 'almacen_id', 'cantidad', 'updated_at'], pageSize: 900,
-    filter: (q: any) => q.gt('cantidad', 0) }, // Solo stock > 0 (3k filas vs 125k)
+  { name: 'marcas',        columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'] },
+  { name: 'fits',          columns: ['id', 'valor', 'sku_code', 'subcategoria_id', 'activo', 'updated_at'] },
+  { name: 'colores',       columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'] },
+  { name: 'tallas',        columns: ['id', 'valor', 'sku_code', 'tipo_talla_id', 'orden', 'updated_at'] },
+  { name: 'categorias',    columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'] },
+  { name: 'subcategorias', columns: ['id', 'valor', 'categoria_id', 'activo', 'updated_at'] },
+  { name: 'generos',       columns: ['id', 'valor', 'sku_code', 'activo', 'updated_at'] },
+  { name: 'almacenes',     columns: ['id', 'nombre', 'codigo', 'color_hex', 'patron', 'color_secundario', 'activo', 'updated_at'] },
+  { name: 'productos',     columns: ['id', 'sku_product', 'modelo', 'categoria_id', 'subcategoria_id', 'marca_id', 'fit_id', 'genero_id', 'precio', 'activo', 'updated_at'] },
+  { name: 'variantes',     columns: ['id', 'sku_variant', 'codigo_barras', 'producto_id', 'color_id', 'talla_id', 'precio', 'activo', 'updated_at'] },
+  { name: 'stock',         columns: ['id', 'variante_id', 'almacen_id', 'cantidad', 'updated_at'] },
 ];
 
 export type SyncProgress = {
@@ -41,69 +38,50 @@ const TABLE_LABELS: Record<string, string> = {
 
 type ProgressCallback = (p: SyncProgress) => void;
 
-// ─── Full sync (primera vez) ──────────────────────────
-
-async function fullSyncTable(table: SyncTable, onProgress?: ProgressCallback): Promise<number> {
-  let totalInserted = 0;
-  let lastId = '';
-  const selectCols = table.columns.join(',');
-
-  while (true) {
-    onProgress?.({ phase: 'downloading', table: table.name, tableName: TABLE_LABELS[table.name], rows: totalInserted });
-
-    let query = supabase.from(table.name).select(selectCols).order('id').limit(table.pageSize);
-    if (table.filter) query = table.filter(query);
-    if (lastId) query = query.gt('id', lastId);
-
-    const { data, error } = await query;
-    if (error) throw new Error(`Error descargando ${TABLE_LABELS[table.name]}: ${error.message}`);
-    if (!data || data.length === 0) break;
-
-    await upsertRows(table.name, data, table.columns);
-    totalInserted += data.length;
-    lastId = data[data.length - 1].id;
-
-    if (data.length < table.pageSize) break;
-  }
-
-  return totalInserted;
-}
-
-// ─── Incremental sync (delta) ─────────────────────────
-
-async function incrementalSyncTable(table: SyncTable, since: string): Promise<number> {
-  let totalUpdated = 0;
-  let lastId = '';
-  const selectCols = table.columns.join(',');
+async function syncTable(
+  table: SyncTable,
+  since: string | null,
+  onProgress?: ProgressCallback,
+): Promise<number> {
+  let totalRows = 0;
+  let page = 1;
 
   while (true) {
-    let query = supabase.from(table.name).select(selectCols).gt('updated_at', since).order('id').limit(table.pageSize);
-    // No aplicar filter en incremental — necesitamos ver TODO lo que cambió
-    if (lastId) query = query.gt('id', lastId);
+    onProgress?.({
+      phase: 'downloading',
+      table: table.name,
+      tableName: TABLE_LABELS[table.name],
+      rows: totalRows,
+    });
 
-    const { data, error } = await query;
-    if (error) throw new Error(`Error actualizando ${TABLE_LABELS[table.name]}: ${error.message}`);
-    if (!data || data.length === 0) break;
+    const params = new URLSearchParams({ page: String(page) });
+    if (since) params.set('since', since);
 
-    await upsertRows(table.name, data, table.columns);
-    totalUpdated += data.length;
-    lastId = data[data.length - 1].id;
+    const data = await railwayGet<{ results: any[]; has_more: boolean; next_page: number | null }>(
+      `/api/movil/sync/${table.name}/?${params}`
+    );
 
-    if (data.length < table.pageSize) break;
+    if (!data.results || data.results.length === 0) break;
+
+    await upsertRows(table.name, data.results, table.columns);
+    totalRows += data.results.length;
+
+    if (!data.has_more) break;
+    page = data.next_page ?? page + 1;
   }
 
-  return totalUpdated;
+  return totalRows;
 }
-
-// ─── Sync principal ───────────────────────────────────
 
 export async function syncDatabase(onProgress?: ProgressCallback): Promise<{ full: boolean; updated: number }> {
   const lastSync = await getLastSync();
   const varCount = await getRowCount('variantes');
   const isFirstSync = !lastSync || varCount === 0;
   const syncStart = new Date().toISOString();
-
   let totalUpdated = 0;
+
+  // Tablas que siempre se sincronizan completas (pocos registros, pueden cambiar campos)
+  const ALWAYS_FULL = new Set(['almacenes']);
 
   if (isFirstSync) {
     onProgress?.({ phase: 'downloading', message: 'Descargando base de datos...' });
@@ -116,19 +94,21 @@ export async function syncDatabase(onProgress?: ProgressCallback): Promise<{ ful
         current: i + 1,
         total: TABLES.length,
       });
-      const count = await fullSyncTable(table, onProgress);
-      totalUpdated += count;
+      totalUpdated += await syncTable(table, null, onProgress);
     }
   } else {
     onProgress?.({ phase: 'checking', message: 'Buscando actualizaciones...' });
     for (const table of TABLES) {
-      const count = await incrementalSyncTable(table, lastSync);
-      totalUpdated += count;
+      const since = ALWAYS_FULL.has(table.name) ? null : lastSync;
+      totalUpdated += await syncTable(table, since, onProgress);
     }
   }
 
   await setLastSync(syncStart);
-  onProgress?.({ phase: 'done', message: totalUpdated > 0 ? `${totalUpdated} registros actualizados` : 'Todo al día' });
+  onProgress?.({
+    phase: 'done',
+    message: totalUpdated > 0 ? `${totalUpdated} registros actualizados` : 'Todo al día',
+  });
 
   return { full: isFirstSync, updated: totalUpdated };
 }

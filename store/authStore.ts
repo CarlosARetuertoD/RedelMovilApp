@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../lib/supabase';
+import { loginRailway, saveTokens, clearTokens } from '../lib/railway';
 import type { User } from '../lib/types';
 
 interface AuthState {
@@ -12,7 +12,7 @@ interface AuthState {
   init: () => Promise<void>;
 }
 
-const STORAGE_KEY = '@redelmovil_user';
+const USER_KEY = '@redelmovil_user';
 
 const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
@@ -21,56 +21,40 @@ const useAuthStore = create<AuthState>((set) => ({
 
   init: async () => {
     try {
-      const json = await AsyncStorage.getItem(STORAGE_KEY);
+      const json = await AsyncStorage.getItem(USER_KEY);
       if (json) {
-        const user = JSON.parse(json);
-        set({ isAuthenticated: true, user, ready: true });
-        return;
+        const { getTokens } = await import('../lib/railway');
+        const tokens = await getTokens();
+        if (tokens) {
+          set({ isAuthenticated: true, user: JSON.parse(json), ready: true });
+          return;
+        }
+        // Usuario guardado pero sin tokens Railway → limpiar y forzar re-login
+        await AsyncStorage.removeItem(USER_KEY);
       }
-    } catch (e) {
-      console.log('[AUTH] init error:', e);
-    }
+    } catch {}
     set({ isAuthenticated: false, user: null, ready: true });
   },
 
   login: async (username, password) => {
     const uname = username.trim().toLowerCase();
-    const pass = password.trim();
-    const { data: usuario } = await supabase
-      .from('usuarios')
-      .select('id, username, first_name, is_active')
-      .eq('username', uname)
-      .eq('is_active', true)
-      .single();
+    const data = await loginRailway(uname, password.trim());
 
-    if (!usuario) throw new Error('Usuario no encontrado');
-
-    const { data: perfil } = await supabase
-      .from('perfiles_usuario')
-      .select('rol, password_visible, activo')
-      .eq('usuario_id', usuario.id)
-      .eq('activo', true)
-      .single();
-
-    if (!perfil) throw new Error('Perfil no encontrado');
-    if (perfil.password_visible !== pass) throw new Error('Contraseña incorrecta');
-    if (!['admin', 'supervisor', 'almacenero'].includes(perfil.rol)) {
-      throw new Error('Solo admin, supervisor y almacenero tienen acceso');
-    }
+    await saveTokens({ access: data.access, refresh: data.refresh });
 
     const user: User = {
-      id: usuario.id,
-      username: usuario.username,
-      nombre: usuario.first_name || usuario.username,
-      rol: perfil.rol,
+      id: data.user.id,
+      username: data.user.username,
+      nombre: data.user.nombre,
+      rol: data.user.rol,
     };
-
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
     set({ isAuthenticated: true, user });
   },
 
   logout: async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await clearTokens();
+    await AsyncStorage.removeItem(USER_KEY);
     set({ isAuthenticated: false, user: null });
   },
 }));
