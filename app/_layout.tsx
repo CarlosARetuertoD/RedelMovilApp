@@ -3,10 +3,10 @@ import { Stack, router, useSegments, useRootNavigationState } from 'expo-router'
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, Animated, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ScanBarcode, Database } from 'lucide-react-native';
+import { ScanBarcode, Database, LogOut } from 'lucide-react-native';
 import * as ExpoSplash from 'expo-splash-screen';
 import useAuthStore from '../store/authStore';
-import useSyncStore, { setSyncDoneCallback } from '../store/syncStore';
+import useSyncStore, { setSyncDoneCallback, setAuthErrorCallback } from '../store/syncStore';
 import useSettingsStore from '../store/settingsStore';
 import { C } from '../lib/colors';
 
@@ -33,6 +33,7 @@ export default function RootLayout() {
     init();
     useSettingsStore.getState().init();
     setSyncDoneCallback(() => queryClient.invalidateQueries());
+    setAuthErrorCallback(() => useAuthStore.getState().logout());
   }, []);
 
 
@@ -160,6 +161,11 @@ export default function RootLayout() {
                 <Pressable onPress={() => doSync()}
                   style={{ backgroundColor: C.cyan, borderRadius: 12, padding: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
                   <Text style={{ color: C.white, fontSize: 15, fontWeight: '700' }}>Reintentar</Text>
+                </Pressable>
+                <Pressable onPress={() => useAuthStore.getState().logout()}
+                  style={{ borderRadius: 12, padding: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+                  <LogOut size={16} color={C.textMuted} />
+                  <Text style={{ color: C.textMuted, fontSize: 14 }}>Cerrar sesión</Text>
                 </Pressable>
               </View>
             )}

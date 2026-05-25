@@ -7,6 +7,14 @@ import { resetDatabase } from '../lib/localDB';
 let _onSyncDone: (() => void) | null = null;
 export function setSyncDoneCallback(cb: () => void) { _onSyncDone = cb; }
 
+// Se setea desde _layout.tsx para hacer logout automático en error de sesión
+let _onAuthError: (() => Promise<void>) | null = null;
+export function setAuthErrorCallback(cb: () => Promise<void>) { _onAuthError = cb; }
+
+function isAuthError(msg: string) {
+  return msg === 'Sesión expirada' || msg === 'Sin sesión';
+}
+
 type SyncState = {
   syncing: boolean;
   firstSyncDone: boolean;
@@ -57,7 +65,9 @@ const useSyncStore = create<SyncState>((set, get) => ({
       });
       if (result.updated > 0) _onSyncDone?.();
     } catch (e: any) {
-      set({ error: e.message || 'Error de sincronización', progress: null });
+      const msg = e.message || 'Error de sincronización';
+      set({ error: msg, progress: null });
+      if (isAuthError(msg)) await _onAuthError?.();
     } finally {
       set({ syncing: false });
     }
@@ -81,7 +91,9 @@ const useSyncStore = create<SyncState>((set, get) => ({
       });
       _onSyncDone?.();
     } catch (e: any) {
-      set({ error: e.message || 'Error', progress: null });
+      const msg = e.message || 'Error';
+      set({ error: msg, progress: null });
+      if (isAuthError(msg)) await _onAuthError?.();
     } finally {
       set({ syncing: false });
     }
