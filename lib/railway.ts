@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE = process.env.EXPO_PUBLIC_RAILWAY_URL ?? 'https://redelerp-backend-production.up.railway.app';
-const TOKEN_KEY = '@redelmovil_tokens';
+const TOKEN_KEY = '@karolayjeansmovil_tokens';
 
 export type Tokens = { access: string; refresh: string };
 

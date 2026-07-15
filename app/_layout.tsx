@@ -187,7 +187,7 @@ export default function RootLayout() {
             <ScanBarcode size={40} color={C.white} />
           </View>
           <Text style={{ color: C.white, fontSize: 22, fontWeight: '800', marginTop: 20 }}>
-            RedelMovilApp
+            KarolayJeansMovilApp
           </Text>
           <Text style={{ color: C.textMuted, fontSize: 12, marginTop: 6 }}>
             Inventario y escaneo móvil

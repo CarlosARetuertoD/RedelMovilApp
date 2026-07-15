@@ -12,7 +12,7 @@ interface AuthState {
   init: () => Promise<void>;
 }
 
-const USER_KEY = '@redelmovil_user';
+const USER_KEY = '@karolayjeansmovil_user';
 
 const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,

@@ -1,6 +1,6 @@
 import { openDatabaseSync, type SQLiteDatabase } from 'expo-sqlite';
 
-const DB_NAME = 'redelmovil.db';
+const DB_NAME = 'karolayjeansmovil.db';
 let _db: SQLiteDatabase | null = null;
 
 export function getDB(): SQLiteDatabase {

@@ -10,7 +10,7 @@ type SettingsState = {
   setScannerMode: (mode: ScannerMode) => Promise<void>;
 };
 
-const STORAGE_KEY = '@redelmovil_settings';
+const STORAGE_KEY = '@karolayjeansmovil_settings';
 
 const useSettingsStore = create<SettingsState>((set) => ({
   scannerMode: 'solo_camara',

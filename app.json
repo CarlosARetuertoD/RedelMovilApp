@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "RedelMovilApp",
-    "slug": "redel-movil-app",
+    "name": "KarolayJeansMovilApp",
+    "slug": "karolay-jeans-movil-app",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "scheme": "redelmovil",
+    "scheme": "karolayjeansmovil",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/icon.png",
@@ -17,14 +17,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.redel.movil"
+      "bundleIdentifier": "com.karolayjeans.movil"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"
       },
-      "package": "com.redel.movil",
+      "package": "com.karolayjeans.movil",
       "permissions": [
         "VIBRATE",
         "CAMERA",
@@ -38,14 +38,14 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Permitir a RedelMovil usar la cámara para escanear códigos de barras"
+          "cameraPermission": "Permitir a KarolayJeansMovil usar la cámara para escanear códigos de barras"
         }
       ]
     ],
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "baafaa26-a4c3-4ac8-94ff-165bb6bd2370"
+        "projectId": "9fb55813-9dde-4a70-aebf-d9b0c09783cb"
       }
     },
     "owner": "carlosretuerto"

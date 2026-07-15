@@ -8,6 +8,7 @@ export interface ConteoFila {
   descripcion: string;
   color: string;
   talla: string;
+  producto_id?: string;
   stockSistema: number;
   esperado: number;
   contado: number;
@@ -28,14 +29,14 @@ interface ConteoState {
   fase: Fase;
   almacenId: string;
   almacenNombre: string;
-  filtrosGrupo: { fits: string[]; marcas: string[]; tallas: string[] };
+  filtrosGrupo: { fits: string[]; marcas: string[]; tallas: string[]; modelo?: string };
   matriz: ConteoFila[];
   sobrantes: ConteoFila[];
   historial: ScanRecord[];
   scanCount: number;
   setFase: (f: Fase) => void;
   setAlmacen: (id: string, nombre: string) => void;
-  setFiltrosGrupo: (f: { fits: string[]; marcas: string[]; tallas: string[] }) => void;
+  setFiltrosGrupo: (f: { fits: string[]; marcas: string[]; tallas: string[]; modelo?: string }) => void;
   cargarMatriz: (filas: ConteoFila[]) => void;
   actualizarEsperado: (vid: string, n: number) => void;
   quitarDeMatriz: (vid: string) => void;
@@ -47,7 +48,7 @@ interface ConteoState {
   restaurarBorrador: () => Promise<boolean>;
 }
 
-const KEY = '@redelmovil_conteo';
+const KEY = '@karolayjeansmovil_conteo';
 
 const useConteoStore = create<ConteoState>((set, get) => ({
   fase: 'preparacion', almacenId: '', almacenNombre: '',

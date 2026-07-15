@@ -33,7 +33,7 @@ export default function LoginScreen() {
           <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' }}>
             <ScanBarcode size={36} color={C.white} />
           </View>
-          <Text style={{ color: C.white, fontSize: 24, fontWeight: '800', marginTop: 20 }}>RedelMovilApp</Text>
+          <Text style={{ color: C.white, fontSize: 24, fontWeight: '800', marginTop: 20 }}>KarolayJeansMovilApp</Text>
           <Text style={{ color: C.textMuted, fontSize: 13, marginTop: 6 }}>Inventario y escaneo móvil</Text>
         </View>
         <View style={{ gap: 14 }}>
