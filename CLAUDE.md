@@ -24,6 +24,9 @@ Es parte del ecosistema Redel:
 - **TanStack React Query 5** (server state/cache)
 - **expo-sqlite 16** (BD local offline-first)
 - **expo-camera 17** (escaneo con cámara)
+- **react-native-webview** (rasterizado de etiquetas a TSPL2 en WebView oculto)
+- **expo-dev-client** (development build — necesario porque hay módulo nativo propio)
+- **Módulo nativo local `modules/spp-printer`** (Kotlin, Bluetooth SPP → impresora térmica)
 - **Lucide React Native** (iconos)
 - **AsyncStorage** (sesión, borradores, configuración)
 - Dark theme mocha/carbon (consistente con ecosistema Redel)
@@ -56,6 +59,8 @@ KarolayJeansERP (Django + PostgreSQL en Railway)
 
 ### Escritura (directo a Railway):
 - Conteo (enviar ajuste) → `POST /api/movil/solicitud/` en KarolayJeansERP
+- Traslado (almacenero) → `POST /api/operaciones/encolar/` (cola de aprobación)
+- Traslado (admin/supervisor) → `POST /api/operaciones/registrar/` (uno por item, directo)
 - Login → `POST /api/auth/token-movil/` en KarolayJeansERP
 
 ### Sincronización (`lib/sync.ts`):
@@ -75,6 +80,9 @@ almacenes, productos, variantes, stock, sync_meta
 - `POST /api/auth/token-movil/` — login (requiere is_staff O rol admin/supervisor/almacenero)
 - `GET /api/movil/sync/{tabla}/` — sync incremental/full por tabla
 - `POST /api/movil/solicitud/` — enviar solicitud de ajuste de inventario
+- `POST /api/operaciones/encolar/` — traslado de almacenero (a cola de aprobación)
+- `POST /api/operaciones/registrar/` — traslado directo (admin/supervisor, un POST por item)
+- `GET /api/plantillas-etiqueta/` — plantilla de etiqueta 50×25 (elementos + es_default)
 
 ## Estructura del proyecto
 
@@ -85,19 +93,30 @@ KarolayJeansMovilApp/
 │   ├── login.tsx                # Login contra Railway
 │   ├── perfil.tsx               # Perfil: user info, sync manual, config escáner
 │   └── (tabs)/
-│       ├── _layout.tsx          # Tab navigator (4 tabs activos)
-│       ├── index.tsx            # Consultas (tab por defecto)
+│       ├── _layout.tsx          # Tab navigator (3 tabs visibles)
+│       ├── index.tsx            # Oculto (href: null)
+│       ├── consultas.tsx        # Consultas
 │       ├── escaner.tsx          # Escáner con cámara + pistola
-│       ├── conteo.tsx           # Conteo de inventario (3 fases)
-│       ├── operaciones.tsx      # En construcción
+│       ├── conteo.tsx           # Conteo de inventario (3 fases) — OCULTO (href: null)
+│       ├── traslados.tsx        # Traslado entre almacenes + impresión de etiquetas
+│       ├── operaciones.tsx      # En construcción (oculto)
 │       └── movimientos.tsx      # Oculto (href: null)
+├── components/
+│   └── LabelRenderer.tsx        # WebView oculto: etiquetas → TSPL2 base64 (promesa)
 ├── lib/
 │   ├── railway.ts               # Cliente HTTP a Railway (railwayGet, railwayPost + JWT)
 │   ├── localDB.ts               # SQLite: tablas, upsert, queries
 │   ├── sync.ts                  # Sync Railway → SQLite
 │   ├── queries.ts               # Todas las consultas (leen de SQLite)
+│   ├── labelPrint.ts            # Plantilla ERP + HTML del renderizador TSPL2
+│   ├── vendor/jsbarcodeSource.ts# Bundle UMD de jsbarcode como string (generado, no editar)
 │   ├── colors.ts                # Paleta mocha/carbon
 │   └── types.ts                 # Interfaces TypeScript
+├── modules/
+│   └── spp-printer/             # Módulo nativo local (Expo Modules API)
+│       ├── index.ts             # API JS (printerStatus, printBase64, permisos; null-safe en Expo Go)
+│       ├── expo-module.config.json
+│       └── android/…/SppPrinterModule.kt  # Port del PrinterBridge+SppPrinter de RedelPrint
 ├── store/
 │   ├── authStore.ts             # Login/logout/session contra Railway
 │   ├── conteoStore.ts           # Matriz, sobrantes, fases
@@ -109,9 +128,30 @@ KarolayJeansMovilApp/
 └── babel.config.js
 ```
 
+## Impresión de etiquetas (Bluetooth térmica) — 2026-07-18
+
+Mismo pipeline que la PWA en la tablet (KarolayJeansApp + RedelPrint), pero autocontenido:
+
+```
+plantilla (GET /api/plantillas-etiqueta/, la es_default)
+  → LabelRenderer (WebView oculto): canvas + jsbarcode CODE128 → BITMAP TSPL2 → base64
+    → modules/spp-printer (Kotlin): Bluetooth SPP → ADV-9013N / HL80 ("Thermal Printer")
+```
+
+- **Protocolo TSPL2** idéntico al de la PWA (`labelPrint.ts` es un port 1:1 del de KarolayJeansApp):
+  etiqueta 50×25mm, 203dpi (8 dots/mm), cabecera capturada de la app oficial, barcode sin antialias.
+- **El Kotlin es un port del PrinterBridge/SppPrinter de RedelPrint** (verificado en hardware):
+  mismos name hints, mismo timeout de connect 8s (write sin timeout), mismo fallback reflexión canal 1.
+  Regla del ecosistema: si cambia el puente en RedelPrint/Kiosko, revisar este port.
+- **Permiso**: BLUETOOTH_CONNECT se pide en runtime (Android 12+). La impresora debe estar
+  **emparejada** en los Ajustes de Bluetooth del celular (una sola vez).
+- **En Expo Go NO imprime** (módulo nativo ausente): `requireOptionalNativeModule` devuelve null
+  y la UI muestra "requiere APK nativo". Todo lo demás de la app sigue funcionando en Expo Go.
+
 ## Pantallas
 
-### Tabs (orden): Escáner → Consultas → Conteo
+### Tabs (orden): Escáner → Consultas → Traslado
+(Conteo quedó **oculto** con `href: null` — decisión 2026-07-18: no se usará por ahora, NO borrar la pantalla)
 
 ### 1. Consultas (`app/(tabs)/index.tsx`) — Tab por defecto
 - **Atajos rápidos**: Jean Dama, Jean Varón, Drill Dama, Drill Varón (asumen Pantalón)
@@ -165,10 +205,19 @@ KarolayJeansMovilApp/
 - "Compartir" → `Share.share()` nativo (WhatsApp, copiar, email…)
 - Tras enviar exitosamente → badge verde "Solicitud enviada" reemplaza el botón
 
-### 4. Operaciones (`app/(tabs)/operaciones.tsx`)
+### 4. Traslados (`app/(tabs)/traslados.tsx`)
+- **Origen → Destino**: pills horizontales con `color_hex` de BD + `textForBg()` (destino excluye el origen). Barra de ruta visual al quedar ambos elegidos
+- **Escaneo**: al armar la ruta se abre la **cámara automáticamente** (sin teclado — pide permiso si falta). El cuadro de texto queda debajo como alternativa (pistola / tipeo manual); el teclado solo aparece si el usuario lo toca. Re-escanear el mismo código incrementa cantidad (capado al stock del origen)
+- Valida stock en origen desde SQLite (`escanearProducto`); vibración 80ms OK / 300ms error
+- **Lista de items**: cantidad con stepper +/- (máx = stock origen), eliminar
+- **Ejecutar** según rol: almacenero → `POST /api/operaciones/encolar/` ("Enviado para aprobación"); admin/supervisor → `POST /api/operaciones/registrar/` por item (junta errores por item). Tras registrar directo dispara `syncDatabase()` para refrescar stock local
+- **Impresión de etiquetas**: toggle "Imprimir etiquetas" (default ON) + chip de estado de impresora (tap = refrescar). Imprime al ejecutar y hay botón Imprimir/Reimprimir en la pantalla de resultado
+- Pantalla de resultado: header ✓/⚠, errores por item si los hay, estado de impresión, "Nuevo traslado"
+
+### 5. Operaciones (`app/(tabs)/operaciones.tsx`)
 - **En construcción** — muestra placeholder (oculto con `href: null`)
 
-### 5. Perfil (`app/perfil.tsx`)
+### 6. Perfil (`app/perfil.tsx`)
 - Info del usuario (nombre, username, rol)
 - **Base de datos local**: última sync, variantes, stock, estado
 - Botón "Sincronizar ahora" (incremental)
@@ -198,17 +247,31 @@ Todas leen de SQLite local. Los parámetros `?` se reemplazan con valores escapa
 | `fetchFilterOptions()` | SQLite | Opciones de filtro (categorías, tallas, etc.) |
 | `parseSmartSearch(input)` | Memoria | Detecta filtros en texto libre |
 | `crearSolicitud(...)` | Railway | POST /api/movil/solicitud/ |
+| `fetchPlantillaEtiqueta()` (labelPrint.ts) | Railway | GET /api/plantillas-etiqueta/ (la es_default) |
 
 ## Desarrollo
 
+> ⚠️ Desde que existe el módulo nativo `spp-printer`, con `expo-dev-client` instalado
+> `npx expo start` apunta por defecto al **development build**. Para Expo Go usar `--go`.
+
 ```bash
-# Iniciar dev server
+# Dev con el development build instalado en el celular (recomendado — imprime de verdad)
 npx expo start --clear
 
-# Testing con Expo Go (escanear QR)
+# Dev con Expo Go (todo funciona MENOS imprimir; el módulo nativo degrada con aviso)
+npx expo start --clear --go
+
 # Celular y PC en la misma red WiFi, o:
 npx expo start --tunnel
 ```
+
+### Development build (una vez, y cada vez que cambie el módulo nativo)
+```bash
+eas build --platform android --profile development
+```
+Genera un APK con dev-client: se instala en el celular y reemplaza a Expo Go para
+desarrollo (hot reload igual). Solo hay que regenerarlo si cambia código nativo
+(modules/spp-printer) o se agregan libs nativas — el JS/TS se sigue recargando en vivo.
 
 ## Build APK
 
@@ -236,8 +299,11 @@ eas build --platform android --profile preview
 - El APK se instala directo en cualquier Android
 
 ### Perfiles de build (`eas.json`)
+- **development** → `.apk` con expo-dev-client (reemplaza a Expo Go para desarrollo; imprime de verdad)
 - **preview** → genera `.apk` (instalación directa, para testing y distribución interna)
 - **production** → genera `.aab` (para subir a Google Play Store)
+
+Los tres compilan el módulo nativo `modules/spp-printer` (autolinking de Expo Modules).
 
 ### Variables de entorno
 La URL de Railway está en `lib/railway.ts` como constante. No hay vars de entorno de Supabase.
@@ -284,3 +350,6 @@ EXPO_PUBLIC_RAILWAY_URL=https://redelerp-backend-production.up.railway.app
 - **Conteo — selección de modelos**: `selectedModelos` en Preparacion usa `null` para "todo seleccionado" (evita timing issue con useEffect). Solo se convierte en `Set<string>` cuando el usuario hace una selección explícita. `filasForConteo` devuelve todas las filas si `selectedModelos === null`.
 - **Conteo — agrupación preview**: `previewGrupos` agrupa `previewData.variantes` por `producto_id` → colores → tallas. Incluye metadata (categoria, subcategoria, genero, marca, fit) del primer variante del producto para mostrar `InfoTag` en la tarjeta.
 - **`ConteoFila`** tiene campo `producto_id?: string` para filtrar selección por modelo.
+- **Impresión SPP**: el módulo nativo (`modules/spp-printer`) es un port del PrinterBridge/SppPrinter de RedelPrint — mismos name hints ("Thermal Printer", ADV-9013N, HL80…), connect con timeout 8s + fallback reflexión canal 1, write sin timeout. Si cambia el puente en RedelPrint/Redel Kiosko, revisar este port.
+- **Rasterizado de etiquetas**: RN no tiene canvas — se hace en un WebView oculto (`components/LabelRenderer.tsx`) con el HTML de `lib/labelPrint.ts` (port 1:1 del labelPrint.ts de la PWA: canvas 400×200, serif, CODE128 sin suavizado, TSPL2). jsbarcode va vendorizado como string en `lib/vendor/jsbarcodeSource.ts` (regenerar con Node desde node_modules de KarolayJeansApp si se actualiza).
+- **Expo Go sigue sirviendo** para todo menos imprimir: `requireOptionalNativeModule('SppPrinter')` devuelve null y la UI lo indica. Con expo-dev-client instalado, `npx expo start` apunta al dev build; usar `--go` para Expo Go.
