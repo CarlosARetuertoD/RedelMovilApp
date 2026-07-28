@@ -1,4 +1,3 @@
-import { railwayPost } from './railway';
 import { queryAll, queryFirst } from './localDB';
 import type { ProductoEscaneado } from './types';
 
@@ -384,12 +383,4 @@ export async function fetchVariantesConStock(filtros: {
   const variantes = rawVariantes.map((v: any) => enrichVariante(v, prodMap.get(v.producto_id), cats));
 
   return buildStockResult(variantes, filtros.almacen_id, cats);
-}
-
-// ─── Solicitudes ──────────────────────────────────────
-
-export async function crearSolicitud(tipo: string, usuario_id: number, usuario_nombre: string, datos: any) {
-  await railwayPost('/api/movil/solicitud/', {
-    tipo, usuario_id, usuario_nombre, app_origen: 'redel_movil', estado: 'pendiente', datos,
-  });
 }

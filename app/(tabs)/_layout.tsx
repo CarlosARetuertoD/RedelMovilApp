@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View, Text, Pressable, Dimensions } from 'react-native';
-import { ScanBarcode, Search, User, ArrowLeftRight } from 'lucide-react-native';
+import { ScanBarcode, Search, User, ArrowLeftRight, PackageCheck } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { C } from '../../lib/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,10 +24,16 @@ function HeaderRight() {
   );
 }
 
+export const unstable_settings = {
+  initialRouteName: 'escaner',
+};
+
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const { width } = Dimensions.get('window');
   const isTablet = width >= 768;
+  const user = useAuthStore(s => s.user);
+  const isAlmacenero = user?.rol === 'almacenero';
 
   return (
     <Tabs screenOptions={{
@@ -47,10 +53,9 @@ export default function TabLayout() {
         tabBarIcon: ({ color, focused }) => <Search size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
       <Tabs.Screen name="traslados" options={{ title: 'Traslado', headerTitle: 'Traslado entre Almacenes',
         tabBarIcon: ({ color, focused }) => <ArrowLeftRight size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
-      <Tabs.Screen name="conteo" options={{ href: null }} />
-      <Tabs.Screen name="index" options={{ href: null }} />
-      <Tabs.Screen name="operaciones" options={{ href: null }} />
-      <Tabs.Screen name="movimientos" options={{ href: null }} />
+      <Tabs.Screen name="ingresos" options={{ title: 'Ingresos', headerTitle: 'Ingresos a Almacén',
+        href: isAlmacenero ? null : undefined,
+        tabBarIcon: ({ color, focused }) => <PackageCheck size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
     </Tabs>
   );
 }

@@ -2,7 +2,7 @@
 
 ## Qué es
 
-App móvil de inventario para **Negocios e Inversiones Karolay** (tienda de ropa). Permite al personal de almacén consultar productos, hacer conteos de inventario y escanear códigos de barras usando **pistola láser USB** o **cámara del celular** (expo-camera).
+App móvil de inventario para **Negocios e Inversiones Karolay** (tienda de ropa). Permite al personal de almacén consultar productos, trasladar stock entre almacenes (con impresión de etiquetas), confirmar ingresos de lotes desde Almacén Principal (solo admin/supervisor) y escanear códigos de barras usando **pistola láser USB** o **cámara del celular** (expo-camera).
 
 Es parte del ecosistema Redel:
 - **KarolayJeansERP** (antes "RedelERP"; Django + React, Railway) — Fuente de verdad, BD principal
@@ -20,7 +20,7 @@ Es parte del ecosistema Redel:
 - **Expo SDK 54** + React Native 0.81.5 + React 19.1
 - **Expo Router 6** (file-based navigation)
 - **TypeScript 5.3** (strict mode)
-- **Zustand 5** (auth, conteo, sync, settings stores)
+- **Zustand 5** (auth, sync, settings stores)
 - **TanStack React Query 5** (server state/cache)
 - **expo-sqlite 16** (BD local offline-first)
 - **expo-camera 17** (escaneo con cámara)
@@ -48,19 +48,21 @@ KarolayJeansERP (Django + PostgreSQL en Railway)
     SQLite local (karolayjeansmovil.db en el celular)
             │ Lectura instantánea, 0 latencia
             ▼
-    La app (escáner, consultas, conteo)
+    La app (escáner, consultas, traslados, ingresos)
             │
-            └── POST /api/movil/solicitud/  ──► Ajustes/conteos enviados a Railway
+            └── POST /api/operaciones/encolar/ o /registrar/  ──► Traslados enviados a Railway
+            └── POST /api/inventario/distribuciones/<id>/enviar-a-tiendas/  ──► Ingresos confirmados
 ```
 
 ### Lectura (todo desde SQLite local):
-- Escáner, Consultas, Conteo → leen de SQLite, NUNCA directo a la red
+- Escáner, Consultas, Traslados → leen de SQLite, NUNCA directo a la red
 - Catálogos (marcas, fits, colores, tallas, etc.) → cacheados en memoria desde SQLite
+- **Ingresos es la excepción**: el listado de "pendiente en Principal" es estado live del ERP (no está en el sync de SQLite), se pide directo a Railway cada vez que se abre la pantalla
 
 ### Escritura (directo a Railway):
-- Conteo (enviar ajuste) → `POST /api/movil/solicitud/` en KarolayJeansERP
 - Traslado (almacenero) → `POST /api/operaciones/encolar/` (cola de aprobación)
 - Traslado (admin/supervisor) → `POST /api/operaciones/registrar/` (uno por item, directo)
+- Ingreso (solo admin/supervisor) → `POST /api/inventario/distribuciones/<id>/enviar-a-tiendas/` (uno por lote involucrado, sin cola de aprobación — no existe ese tipo_operacion en el backend)
 - Login → `POST /api/auth/token-movil/` en KarolayJeansERP
 
 ### Sincronización (`lib/sync.ts`):
@@ -79,10 +81,11 @@ almacenes, productos, variantes, stock, sync_meta
 ### Endpoints Railway usados:
 - `POST /api/auth/token-movil/` — login (requiere is_staff O rol admin/supervisor/almacenero)
 - `GET /api/movil/sync/{tabla}/` — sync incremental/full por tabla
-- `POST /api/movil/solicitud/` — enviar solicitud de ajuste de inventario
 - `POST /api/operaciones/encolar/` — traslado de almacenero (a cola de aprobación)
 - `POST /api/operaciones/registrar/` — traslado directo (admin/supervisor, un POST por item)
 - `GET /api/plantillas-etiqueta/` — plantilla de etiqueta 50×25 (elementos + es_default)
+- `GET /api/inventario/distribuciones/pendiente-principal/` — lotes con items pendientes en Almacén Principal
+- `POST /api/inventario/distribuciones/<id>/enviar-a-tiendas/` — confirma ingreso (Fase 2), body `{items:[{detalle_id,cantidad}]}`
 
 ## Estructura del proyecto
 
@@ -93,14 +96,11 @@ KarolayJeansMovilApp/
 │   ├── login.tsx                # Login contra Railway
 │   ├── perfil.tsx               # Perfil: user info, sync manual, config escáner
 │   └── (tabs)/
-│       ├── _layout.tsx          # Tab navigator (3 tabs visibles)
-│       ├── index.tsx            # Oculto (href: null)
+│       ├── _layout.tsx          # Tab navigator (initialRouteName: escaner; ingresos oculto para almacenero)
 │       ├── consultas.tsx        # Consultas
 │       ├── escaner.tsx          # Escáner con cámara + pistola
-│       ├── conteo.tsx           # Conteo de inventario (3 fases) — OCULTO (href: null)
 │       ├── traslados.tsx        # Traslado entre almacenes + impresión de etiquetas
-│       ├── operaciones.tsx      # En construcción (oculto)
-│       └── movimientos.tsx      # Oculto (href: null)
+│       └── ingresos.tsx         # Confirmar ingreso de lotes (Fase 2) — solo admin/supervisor
 ├── components/
 │   └── LabelRenderer.tsx        # WebView oculto: etiquetas → TSPL2 base64 (promesa)
 ├── lib/
@@ -108,6 +108,7 @@ KarolayJeansMovilApp/
 │   ├── localDB.ts               # SQLite: tablas, upsert, queries
 │   ├── sync.ts                  # Sync Railway → SQLite
 │   ├── queries.ts               # Todas las consultas (leen de SQLite)
+│   ├── distribuciones.ts        # Ingresos de Stock: pendiente-principal + enviar-a-tiendas (Railway directo)
 │   ├── labelPrint.ts            # Plantilla ERP + HTML del renderizador TSPL2
 │   ├── vendor/jsbarcodeSource.ts# Bundle UMD de jsbarcode como string (generado, no editar)
 │   ├── colors.ts                # Paleta mocha/carbon
@@ -119,7 +120,6 @@ KarolayJeansMovilApp/
 │       └── android/…/SppPrinterModule.kt  # Port del PrinterBridge+SppPrinter de RedelPrint
 ├── store/
 │   ├── authStore.ts             # Login/logout/session contra Railway
-│   ├── conteoStore.ts           # Matriz, sobrantes, fases
 │   ├── syncStore.ts             # Estado de sincronización
 │   └── settingsStore.ts         # Configuración (modo escáner)
 ├── app.json
@@ -150,10 +150,12 @@ plantilla (GET /api/plantillas-etiqueta/, la es_default)
 
 ## Pantallas
 
-### Tabs (orden): Escáner → Consultas → Traslado
-(Conteo quedó **oculto** con `href: null` — decisión 2026-07-18: no se usará por ahora, NO borrar la pantalla)
+### Tabs (orden): Escáner → Consultas → Traslado → Ingresos (Ingresos solo visible para admin/supervisor)
+(2026-07-27: se eliminaron definitivamente Conteo, Operaciones, Movimientos e index.tsx —
+código muerto sin uso; ver "Notas técnicas" para detalle. `escaner` es la ruta inicial via
+`unstable_settings` en `_layout.tsx`. Mismo día se agregó el tab Ingresos.)
 
-### 1. Consultas (`app/(tabs)/index.tsx`) — Tab por defecto
+### 1. Consultas (`app/(tabs)/consultas.tsx`)
 - **Atajos rápidos**: Jean Dama, Jean Varón, Drill Dama, Drill Varón (asumen Pantalón)
 - **Filtros cascada**: Categoría → Subcategoría → Género → Marca (top 5 pills) → Fit (top 5 pills) → Talla
 - **Tallas inteligentes**: numéricas para pantalón/bermuda, alfanuméricas para casaca
@@ -174,38 +176,7 @@ plantilla (GET /api/plantillas-etiqueta/, la es_default)
 - **Colores tocables**: tap navega a ese color del mismo producto
 - Feedback visual al navegar (spinner en la talla/color seleccionado)
 
-### 3. Conteo (`app/(tabs)/conteo.tsx`)
-**3 fases:**
-
-#### FASE 1 — Preparación con preview en vivo
-- Almacén: pills horizontales con color_hex de BD + `textForBg()` para contraste (orden: A11, A20, B80, B77, C26, Almacen 1, Almacen 2)
-- **Búsqueda por modelo**: TextInput con debounce 450ms — activa el preview desde 2 caracteres. Si se escribe modelo SIN seleccionar atajos, oculta los atajos y filtros en cascada (modo búsqueda directa).
-- Atajos: Jean Dama/Varón, Drill Dama/Varón + "Otra categoría" — solo visibles si no hay texto en modelo
-- Filtros cascada: Categoría → Subcategoría → Género → Marca (top 5) → Fit (top 5) → Talla. Visibles cuando se usaron atajos; modelo actúa como refinamiento adicional
-- **Preview agrupado en 2 niveles**:
-  - Nivel 1: tarjetas por **modelo** — nombre, tags (subcategoría, género, marca, fit), cantidad de colores, total prendas. Tap expande/colapsa
-  - Nivel 2: dentro de cada modelo, cards por **color** con tallas y stock (T28:2, T30:4…)
-- **Selección de modelos**: checkbox por tarjeta. `null` = todo seleccionado (default). Botones "Todo / Ninguno". Barra muestra "X de Y modelos · N prendas"
-- Botón fijo: "Empezar conteo · todo · N prendas" o "X modelos · N prendas". Deshabilitado si nada seleccionado
-- `fetchVariantesConStock` soporta parámetro `search` que filtra por `modelo LIKE ?` en productos
-
-#### FASE 2 — Escaneo
-- Input para pistola láser
-- **Vibración háptica**: OK → 80ms, COMPLETO → doble pulso (80+80ms), EXCEDE/SOBRANTE → 300ms
-- Barra de progreso, contadores color-coded (OK/Pendientes/Excedentes/Sobrantes)
-- Acciones: Deshacer, Pausar (guarda borrador), Ver resultados
-
-#### FASE 3 — Resultados
-- Header con ícono grande (✓ verde / ⚠ rojo) + nombre almacén + fecha
-- 3 tarjetas de totales grandes: Esperado / Contado / Diferencia
-- Barra de precisión con % color-coded + 4 stats
-- Secciones colapsables: Faltantes, Sobrantes, Excedentes — con count badge y toggle
-- Cada fila: descripción + contado/esperado + badge de diferencia con fondo de color
-- Acciones fijas al pie: "Enviar solicitud" (prominente, solo si no cuadra) + fila Continuar/Compartir/Reset + "Nuevo conteo"
-- "Compartir" → `Share.share()` nativo (WhatsApp, copiar, email…)
-- Tras enviar exitosamente → badge verde "Solicitud enviada" reemplaza el botón
-
-### 4. Traslados (`app/(tabs)/traslados.tsx`)
+### 3. Traslados (`app/(tabs)/traslados.tsx`)
 - **Origen → Destino**: pills horizontales con `color_hex` de BD + `textForBg()` (destino excluye el origen). Barra de ruta visual al quedar ambos elegidos
 - **Escaneo**: al armar la ruta se abre la **cámara automáticamente** (sin teclado — pide permiso si falta). El cuadro de texto queda debajo como alternativa (pistola / tipeo manual); el teclado solo aparece si el usuario lo toca. Re-escanear el mismo código incrementa cantidad (capado al stock del origen)
 - Valida stock en origen desde SQLite (`escanearProducto`); vibración 80ms OK / 300ms error
@@ -214,10 +185,29 @@ plantilla (GET /api/plantillas-etiqueta/, la es_default)
 - **Impresión de etiquetas**: toggle "Imprimir etiquetas" (default ON) + chip de estado de impresora (tap = refrescar). Imprime al ejecutar y hay botón Imprimir/Reimprimir en la pantalla de resultado
 - Pantalla de resultado: header ✓/⚠, errores por item si los hay, estado de impresión, "Nuevo traslado"
 
-### 5. Operaciones (`app/(tabs)/operaciones.tsx`)
-- **En construcción** — muestra placeholder (oculto con `href: null`)
+### 4. Ingresos (`app/(tabs)/ingresos.tsx`) — solo admin/supervisor
+Confirma la **Fase 2 ("Enviar a Tiendas")** del flujo "Ingresos de Stock" / "Lotes Por Ingresar" del ERP
+(modelo `Distribucion`/`DistribucionDetalle`, app Django `inventario`). La Fase 1 (armar el lote,
+"Recibir en Principal", que es cuando se consume la etiqueta física) sigue siendo tarea de escritorio
+en KarolayJeansApp — esta pantalla solo cubre la entrega física del Almacén Principal al destino final.
+- **Destino**: pills horizontales (mismo filtro que Traslados, excluye Almacén Principal — acá es el origen implícito)
+- Al elegir destino, pide `GET /api/inventario/distribuciones/pendiente-principal/` (Railway directo, no SQLite)
+  y muestra cuántas referencias/prendas hay pendientes de ingresar a ese almacén
+- **Escaneo**: cámara automática igual que Traslados. Cada scan resuelve el código de barras a `variante_id`
+  vía `escanearProducto()` (SQLite local) y lo cruza contra los items pendientes del destino elegido
+- Si la variante no tiene nada pendiente para ese destino → error (rojo, vibración 300ms)
+- **Multi-lote**: si la misma variante+destino tiene pendiente repartido en varios lotes, se reparte
+  FIFO por fecha (orden que ya devuelve el backend) al momento de "Ejecutar" — el usuario no necesita saber
+  a qué lote pertenece cada unidad física
+- **Ejecutar**: agrupa los items del carrito por `distribucion_id` y llama `enviar-a-tiendas` una vez
+  por lote involucrado (body `{items:[{detalle_id,cantidad}]}`). **Esto SÍ mueve stock real**
+  (TRASLADO Almacén Principal → destino) — lo que NO se vuelve a tocar es el conteo de etiquetas,
+  ya consumido en Fase 1. Tras ejecutar dispara `syncDatabase()` y refresca el pendiente
+- **Sin cola de aprobación**: no existe `tipo_operacion` encolable para esta fase en el backend — por eso
+  la pantalla completa está oculta para `rol === 'almacenero'` en `_layout.tsx` (`href: null`), no solo
+  el botón de ejecutar
 
-### 6. Perfil (`app/perfil.tsx`)
+### 5. Perfil (`app/perfil.tsx`)
 - Info del usuario (nombre, username, rol)
 - **Base de datos local**: última sync, variantes, stock, estado
 - Botón "Sincronizar ahora" (incremental)
@@ -242,11 +232,10 @@ Todas leen de SQLite local. Los parámetros `?` se reemplazan con valores escapa
 |---------|--------|-------------|
 | `loadCatalogs()` | SQLite | Carga catálogos en memoria (Maps id→valor) |
 | `escanearProducto(code)` | SQLite | Info completa + stock + tallas hermanas + colores |
-| `fetchVariantesConStock(filtros)` | SQLite | Para consultas y conteo, con stock por almacén |
+| `fetchVariantesConStock(filtros)` | SQLite | Para consultas y traslados, con stock por almacén |
 | `fetchTopMarcasYFits(filtros)` | SQLite | Top marcas/fits para pills inline |
 | `fetchFilterOptions()` | SQLite | Opciones de filtro (categorías, tallas, etc.) |
 | `parseSmartSearch(input)` | Memoria | Detecta filtros en texto libre |
-| `crearSolicitud(...)` | Railway | POST /api/movil/solicitud/ |
 | `fetchPlantillaEtiqueta()` (labelPrint.ts) | Railway | GET /api/plantillas-etiqueta/ (la es_default) |
 
 ## Desarrollo
@@ -331,7 +320,6 @@ EXPO_PUBLIC_RAILWAY_URL=https://redelerp-backend-production.up.railway.app
 
 ## Pendiente / TODO
 
-- [ ] Completar sección Operaciones → "Mis Solicitudes" (ver estado de solicitudes enviadas)
 - [ ] Sync: detectar borrados (soft-delete con activo=false en KarolayJeansERP)
 - [ ] Configurar auto-build desde GitHub
 
@@ -347,9 +335,15 @@ EXPO_PUBLIC_RAILWAY_URL=https://redelerp-backend-production.up.railway.app
 - **Almacenes color_hex**: la tabla almacenes tiene `color_hex`. Al replicar el scanner, agregar esta columna al SQLite local (localDB.ts createTables) y al sync (sync.ts).
 - **Scanner replicable**: ver `Scanner_RedelERP_Instrucciones.txt` en el Escritorio para instrucciones completas. La función `escanearProducto()` en queries.ts ya implementa la lógica central (tallas hermanas, colores disponibles, stock por almacén).
 - **Filtros UX**: usar pills para categoría, subcategoría, género, talla (Casaca→alfabéticas), almacén (con color_hex de BD + textForBg). Selects solo para marca/fit. Ocultar "Unisex" de género.
-- **Conteo — selección de modelos**: `selectedModelos` en Preparacion usa `null` para "todo seleccionado" (evita timing issue con useEffect). Solo se convierte en `Set<string>` cuando el usuario hace una selección explícita. `filasForConteo` devuelve todas las filas si `selectedModelos === null`.
-- **Conteo — agrupación preview**: `previewGrupos` agrupa `previewData.variantes` por `producto_id` → colores → tallas. Incluye metadata (categoria, subcategoria, genero, marca, fit) del primer variante del producto para mostrar `InfoTag` en la tarjeta.
-- **`ConteoFila`** tiene campo `producto_id?: string` para filtrar selección por modelo.
+- **2026-07-27 — Conteo, Operaciones, Movimientos e index.tsx eliminados definitivamente**: eran código muerto (Conteo llevaba oculto desde 07-18 sin plan de retomarlo; Operaciones/Movimientos placeholders sin implementación; index.tsx era solo un redirect a /escaner, reemplazado por `unstable_settings.initialRouteName` en `_layout.tsx`). Se borró también `store/conteoStore.ts` (sin otros consumidores) y `crearSolicitud()` de `queries.ts` (solo la usaba Conteo). Si se recupera la necesidad de conteo de inventario, recrear desde el historial de git (`git log --diff-filter=D -- "app/(tabs)/conteo.tsx"`).
 - **Impresión SPP**: el módulo nativo (`modules/spp-printer`) es un port del PrinterBridge/SppPrinter de RedelPrint — mismos name hints ("Thermal Printer", ADV-9013N, HL80…), connect con timeout 8s + fallback reflexión canal 1, write sin timeout. Si cambia el puente en RedelPrint/Redel Kiosko, revisar este port.
 - **Rasterizado de etiquetas**: RN no tiene canvas — se hace en un WebView oculto (`components/LabelRenderer.tsx`) con el HTML de `lib/labelPrint.ts` (port 1:1 del labelPrint.ts de la PWA: canvas 400×200, serif, CODE128 sin suavizado, TSPL2). jsbarcode va vendorizado como string en `lib/vendor/jsbarcodeSource.ts` (regenerar con Node desde node_modules de KarolayJeansApp si se actualiza).
 - **Expo Go sigue sirviendo** para todo menos imprimir: `requireOptionalNativeModule('SppPrinter')` devuelve null y la UI lo indica. Con expo-dev-client instalado, `npx expo start` apunta al dev build; usar `--go` para Expo Go.
+- **Ingresos (2026-07-27)**: decisión explícita de Carlos — solo cubre Fase 2 (Enviar a Tiendas) y solo
+  admin/supervisor puede ejecutarla, replicando la regla que ya existe en el proxy Next.js de KarolayJeansApp
+  (`SOLO_EJECUCION_DIRECTA`), que Django no aplica del lado del servidor. Si más adelante se quiere que
+  almacenero también pueda confirmar ingresos desde el celular, hace falta agregar `ENVIAR_A_TIENDAS` como
+  `tipo_operacion` encolable en KarolayJeansERP (`apps/operaciones/views.py::EncolarPendienteView` y
+  `apps/sync/views.py::_process_movement_rows()`) — hoy esa cola solo soporta `RECIBIR_EN_PRINCIPAL`.
+  El endpoint `enviar-a-tiendas` es por lote (`distribucion_id` en la URL), no por variante — por eso
+  `ingresos.tsx` agrupa el carrito por lote antes de ejecutar.

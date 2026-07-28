@@ -18,7 +18,7 @@ export default function LoginScreen() {
     setError('');
     try {
       await login(username.trim(), password);
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/escaner');
     } catch (e: any) {
       setError(e.message || 'Error al iniciar sesión');
     } finally {

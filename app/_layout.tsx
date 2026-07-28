@@ -63,7 +63,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!ready || !navState?.key || didRedirect.current) return;
     didRedirect.current = true;
-    router.replace(isAuthenticated ? '/(tabs)' : '/login');
+    router.replace(isAuthenticated ? '/(tabs)/escaner' : '/login');
     setTimeout(() => {
       Animated.timing(fadeOut, { toValue: 0, duration: 300, useNativeDriver: true })
         .start(() => setSplashDone(true));
@@ -73,7 +73,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!didRedirect.current || !navState?.key) return;
     const inLogin = segments[0] === 'login';
-    if (isAuthenticated && inLogin) router.replace('/(tabs)');
+    if (isAuthenticated && inLogin) router.replace('/(tabs)/escaner');
     else if (!isAuthenticated && !inLogin) router.replace('/login');
   }, [isAuthenticated]);
 
