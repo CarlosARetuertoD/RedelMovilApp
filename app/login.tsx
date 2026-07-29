@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { router } from 'expo-router';
-import { ScanBarcode } from 'lucide-react-native';
 import useAuthStore from '../store/authStore';
 import { C } from '../lib/colors';
 
@@ -30,11 +29,10 @@ export default function LoginScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 32 }}>
         <View style={{ alignItems: 'center', marginBottom: 48 }}>
-          <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center' }}>
-            <ScanBarcode size={36} color={C.white} />
-          </View>
-          <Text style={{ color: C.white, fontSize: 24, fontWeight: '800', marginTop: 20 }}>KarolayJeansMovilApp</Text>
-          <Text style={{ color: C.textMuted, fontSize: 13, marginTop: 6 }}>Inventario y escaneo móvil</Text>
+          {/* Logo del ecosistema Redel: gris/plata sobre fondo oscuro, siempre suelto (sin placa) */}
+          <Image source={require('../assets/logo-redel-login.png')}
+            style={{ width: 180, height: 180 }} resizeMode="contain" />
+          <Text style={{ color: C.textMuted, fontSize: 13, marginTop: 4 }}>Inventario y escaneo móvil</Text>
         </View>
         <View style={{ gap: 14 }}>
           <View>
