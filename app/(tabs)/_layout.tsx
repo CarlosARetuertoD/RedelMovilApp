@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View, Text, Pressable, Dimensions } from 'react-native';
-import { ScanBarcode, Search, User, ArrowLeftRight, PackageCheck } from 'lucide-react-native';
+import { ScanBarcode, Search, User, ArrowLeftRight, PackageCheck, ShoppingCart } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { C } from '../../lib/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,6 +53,8 @@ export default function TabLayout() {
         tabBarIcon: ({ color, focused }) => <Search size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
       <Tabs.Screen name="traslados" options={{ title: 'Traslado', headerTitle: 'Traslado entre Almacenes',
         tabBarIcon: ({ color, focused }) => <ArrowLeftRight size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
+      <Tabs.Screen name="ventas" options={{ title: 'Ventas', headerTitle: 'Registrar Ventas',
+        tabBarIcon: ({ color, focused }) => <ShoppingCart size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />
       <Tabs.Screen name="ingresos" options={{ title: 'Ingresos', headerTitle: 'Ingresos a Almacén',
         href: isAlmacenero ? null : undefined,
         tabBarIcon: ({ color, focused }) => <PackageCheck size={22} color={color} strokeWidth={focused ? 2.5 : 1.8} /> }} />

@@ -10,18 +10,8 @@ import { syncDatabase } from '../../lib/sync';
 import { fetchPlantillaEtiqueta, type LabelJob } from '../../lib/labelPrint';
 import { isNativePrinterAvailable, printerStatus, printBase64, requestBluetoothPermission, type PrinterStatus } from '../../modules/spp-printer';
 import LabelRenderer, { type LabelRendererHandle } from '../../components/LabelRenderer';
+import { AlmacenPills, AlmacenSwatch } from '../../components/AlmacenPills';
 import { C } from '../../lib/colors';
-
-function hexToRgb(hex: string) {
-  const c = hex?.replace('#', '');
-  if (!c || c.length < 6) return null;
-  return { r: parseInt(c.slice(0, 2), 16), g: parseInt(c.slice(2, 4), 16), b: parseInt(c.slice(4, 6), 16) };
-}
-function textForBg(hex: string) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return '#ffffff';
-  return (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255 > 0.55 ? '#1a1a1a' : '#ffffff';
-}
 
 interface TrasladoItem {
   variante_id: string;
@@ -325,47 +315,23 @@ export default function TrasladosScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
 
         {/* ── Origen ── */}
-        <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700' }}>ORIGEN</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-          {(almacenes || []).map((a: any) => {
-            const sel = a.id === origenId;
-            const bg = sel ? (a.color_hex || C.accent) : C.card;
-            const tc = sel ? (a.color_hex ? textForBg(a.color_hex) : C.white) : C.textSecondary;
-            return (
-              <Pressable key={a.id} onPress={() => { setOrigenId(a.id === origenId ? null : a.id); if (a.id === destinoId) setDestinoId(null); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: sel ? bg : (a.color_hex || C.border) + '60' }}>
-                {!sel && a.color_hex && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: a.color_hex }} />}
-                <Text style={{ color: tc, fontSize: 14, fontWeight: '700' }}>{a.nombre}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>ORIGEN</Text>
+        <AlmacenPills almacenes={almacenes} selectedId={origenId}
+          onSelect={(id) => { setOrigenId(id === origenId ? null : id); if (id === destinoId) setDestinoId(null); }} />
 
         {/* ── Destino ── */}
         {origenId && (
           <>
-            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700' }}>DESTINO</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {(almacenes || []).filter((a: any) => a.id !== origenId).map((a: any) => {
-                const sel = a.id === destinoId;
-                const bg = sel ? (a.color_hex || C.accent) : C.card;
-                const tc = sel ? (a.color_hex ? textForBg(a.color_hex) : C.white) : C.textSecondary;
-                return (
-                  <Pressable key={a.id} onPress={() => setDestinoId(a.id === destinoId ? null : a.id)}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: bg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: sel ? bg : (a.color_hex || C.border) + '60' }}>
-                    {!sel && a.color_hex && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: a.color_hex }} />}
-                    <Text style={{ color: tc, fontSize: 14, fontWeight: '700' }}>{a.nombre}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>DESTINO</Text>
+            <AlmacenPills almacenes={almacenes} excludeId={origenId} selectedId={destinoId}
+              onSelect={(id) => setDestinoId(id === destinoId ? null : id)} />
           </>
         )}
 
         {/* ── Ruta ── */}
         {rutaLista && (
           <View style={{ backgroundColor: C.card, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border }}>
-            <View style={{ width: 10, height: 36, borderRadius: 5, backgroundColor: origenAlm?.color_hex || C.accent }} />
+            <AlmacenSwatch almacen={origenAlm} width={10} height={36} radius={5} />
             <View style={{ flex: 1 }}>
               <Text style={{ color: C.amberLight, fontSize: 10, fontWeight: '700' }}>ORIGEN</Text>
               <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{origenAlm?.nombre}</Text>
@@ -375,7 +341,7 @@ export default function TrasladosScreen() {
               <Text style={{ color: C.indigoLight, fontSize: 10, fontWeight: '700' }}>DESTINO</Text>
               <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{destinoAlm?.nombre}</Text>
             </View>
-            <View style={{ width: 10, height: 36, borderRadius: 5, backgroundColor: destinoAlm?.color_hex || C.accent }} />
+            <AlmacenSwatch almacen={destinoAlm} width={10} height={36} radius={5} />
           </View>
         )}
 

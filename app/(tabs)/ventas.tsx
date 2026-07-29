@@ -1,80 +1,71 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Vibration } from 'react-native';
-import { PackageCheck, Camera, X, Trash2, Minus, Plus, Send, CheckCircle, AlertTriangle, RefreshCw } from 'lucide-react-native';
+import { ArrowRight, ShoppingCart, Camera, X, Trash2, Minus, Plus, Send, CheckCircle, AlertTriangle } from 'lucide-react-native';
 import { useQuery } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import useAuthStore from '../../store/authStore';
 import { fetchAlmacenes, escanearProducto } from '../../lib/queries';
-import { fetchPendientePrincipal, enviarATiendas } from '../../lib/distribuciones';
+import { railwayPost } from '../../lib/railway';
 import { syncDatabase } from '../../lib/sync';
+import { AlmacenPills, AlmacenSwatch } from '../../components/AlmacenPills';
 import { C } from '../../lib/colors';
-import { AlmacenPills } from '../../components/AlmacenPills';
 
-interface RefPendiente {
-  detalle_id: string;
-  distribucion_id: string;
-  distribucion_codigo: string;
-  disponible: number;
-}
-
-interface IngresoItem {
+interface VentaItem {
   variante_id: string;
   sku_variant: string;
+  codigo_barras: string;
   modelo: string;
   marca: string;
+  fit: string;
   color: string;
   talla: string;
+  precio: number;
+  stock_origen: number;
   cantidad: number;
-  pendienteTotal: number;
-  refs: RefPendiente[];
 }
 
-type Resultado = { procesados: number; errores: { codigo: string; error: string }[] };
+type Resultado =
+  | { tipo: 'pendiente'; total: number }
+  | { tipo: 'directo'; procesados: number; errores: { codigo_barras: string; error: string }[] };
 
-export default function IngresosScreen() {
-  const { data: almacenesData } = useQuery({ queryKey: ['almacenes'], queryFn: fetchAlmacenes });
-  // Almacén Principal es el origen implícito de todo ingreso (zona de tránsito de lotes) —
-  // nunca aparece como destino seleccionable, igual que en Traslados.
-  const almacenes = useMemo(() => (almacenesData || []).filter((a: any) => !a.es_almacen_principal), [almacenesData]);
+export default function VentasScreen() {
+  const user = useAuthStore(s => s.user);
+  // A diferencia de Traslados, ventas lista TODOS los almacenes activos (igual que
+  // la PWA): el Almacén Principal también puede vender directo.
+  const { data: almacenes } = useQuery({ queryKey: ['almacenes'], queryFn: fetchAlmacenes });
 
-  const { data: pendienteData, isLoading: pendienteLoading, refetch: refetchPendiente } = useQuery({
-    queryKey: ['pendientePrincipal'],
-    queryFn: fetchPendientePrincipal,
-    staleTime: 30 * 1000,
-  });
-
+  const [origenId, setOrigenId] = useState<string | null>(null);
   const [destinoId, setDestinoId] = useState<string | null>(null);
-  const [items, setItems] = useState<IngresoItem[]>([]);
+  const [items, setItems] = useState<VentaItem[]>([]);
   const [inputCode, setInputCode] = useState('');
   const [scanMsg, setScanMsg] = useState<{ text: string; color: string } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
-  const [snapshot, setSnapshot] = useState<IngresoItem[]>([]);
+  const [snapshot, setSnapshot] = useState<VentaItem[]>([]);
 
   const inputRef = useRef<TextInput>(null);
   const [permission, requestPermission] = useCameraPermissions();
 
-  const destinoAlm = (almacenes || []).find((a: any) => a.id === destinoId);
+  // Origen === destino es válido: "venta directa desde el mismo almacén"
+  const rutaLista = !!(origenId && destinoId);
+  const ventaDirecta = rutaLista && origenId === destinoId;
   const totalPrendas = items.reduce((s, it) => s + it.cantidad, 0);
+  const totalSoles = items.reduce((s, it) => s + it.cantidad * it.precio, 0);
+  const origenAlm = (almacenes || []).find((a: any) => a.id === origenId);
+  const destinoAlm = (almacenes || []).find((a: any) => a.id === destinoId);
 
-  const pendienteParaDestino = useMemo(() => {
-    if (!destinoId) return [];
-    return (pendienteData?.distribuciones || []).flatMap((d: any) =>
-      d.items_pendientes.filter((ip: any) => ip.almacen_destino_id === destinoId));
-  }, [pendienteData, destinoId]);
-  const totalPendienteDestino = pendienteParaDestino.reduce((s: number, ip: any) => s + ip.pendiente_envio, 0);
-
-  // Al elegir destino, abrir la cámara automáticamente (sin teclado).
+  // Al quedar la ruta armada, abrir la cámara automáticamente (sin teclado)
   useEffect(() => {
-    if (!destinoId) { setCameraOpen(false); return; }
+    if (!rutaLista) { setCameraOpen(false); return; }
     (async () => {
       if (permission?.granted) { setCameraOpen(true); return; }
       const r = await requestPermission();
       if (r.granted) setCameraOpen(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destinoId]);
+  }, [rutaLista]);
 
   const show = (text: string, color: string) => {
     setScanMsg({ text, color });
@@ -85,50 +76,44 @@ export default function IngresosScreen() {
     const code = raw.trim();
     setInputCode('');
     if (!code) return;
-    if (!destinoId) { show('Selecciona el almacén destino primero', C.amber); return; }
+    if (!origenId) { show('Selecciona el almacén origen primero', C.amber); return; }
     try {
       const data = await escanearProducto(code);
       if (!data) { show(`No encontrado: ${code}`, C.red); Vibration.vibrate(300); return; }
-
-      const matches: RefPendiente[] = (pendienteData?.distribuciones || [])
-        .flatMap((d: any) => d.items_pendientes
-          .filter((ip: any) => ip.variante_id === data.id && ip.almacen_destino_id === destinoId)
-          .map((ip: any) => ({
-            detalle_id: ip.detalle_id, distribucion_id: d.distribucion_id,
-            distribucion_codigo: d.codigo, disponible: ip.pendiente_envio,
-          })));
-      const pendienteTotal = matches.reduce((s, m) => s + m.disponible, 0);
-
-      if (pendienteTotal <= 0) {
-        show(`Sin lote pendiente para ${data.sku_variant} → ${destinoAlm?.nombre || 'destino'}`, C.red);
+      const stockOrigen = data.stockPorAlmacen.find((s: any) => s.almacen_id === origenId)?.cantidad ?? 0;
+      if (stockOrigen <= 0) {
+        show(`Sin stock en ${origenAlm?.nombre || 'origen'}: ${data.sku_variant}`, C.red);
         Vibration.vibrate(300);
         return;
       }
-
       const existing = items.find(it => it.variante_id === data.id);
       if (existing) {
-        if (existing.cantidad >= existing.pendienteTotal) {
-          show(`Máximo pendiente (${existing.pendienteTotal}): ${data.sku_variant}`, C.amber);
+        if (existing.cantidad >= stockOrigen) {
+          show(`Máximo stock en origen (${stockOrigen}): ${data.sku_variant}`, C.amber);
           Vibration.vibrate(300);
           return;
         }
-        setItems(prev => prev.map(it => it.variante_id === data.id ? { ...it, cantidad: it.cantidad + 1 } : it));
-        show(`+1 ${data.sku_variant} → ${existing.cantidad + 1}/${existing.pendienteTotal}`, C.blue);
+        // Igual que la PWA: escaneo repetido suma +1 y sube el ítem al tope
+        setItems(prev => {
+          const it = prev.find(p => p.variante_id === data.id)!;
+          return [{ ...it, cantidad: it.cantidad + 1 }, ...prev.filter(p => p.variante_id !== data.id)];
+        });
+        show(`+1 ${data.sku_variant} → ${existing.cantidad + 1}/${stockOrigen}`, C.blue);
         Vibration.vibrate(80);
       } else {
-        setItems(prev => [...prev, {
-          variante_id: data.id, sku_variant: data.sku_variant,
+        setItems(prev => [{
+          variante_id: data.id, sku_variant: data.sku_variant, codigo_barras: data.codigo_barras,
           modelo: data.producto_modelo || '—', marca: data.marca_nombre || '',
-          color: data.color_nombre || '—', talla: data.talla_valor || '—',
-          cantidad: 1, pendienteTotal, refs: matches,
-        }]);
-        show(`+ ${data.sku_variant} (pendiente: ${pendienteTotal})`, C.emerald);
+          fit: data.fit_nombre || '', color: data.color_nombre || '—', talla: data.talla_valor || '—',
+          precio: Number(data.precio) || 0, stock_origen: stockOrigen, cantidad: 1,
+        }, ...prev]);
+        show(`+ ${data.sku_variant} (stock: ${stockOrigen})`, C.emerald);
         Vibration.vibrate(80);
       }
     } catch {
       show('Error al buscar', C.red);
     }
-  }, [destinoId, destinoAlm, items, pendienteData]);
+  }, [origenId, origenAlm, items]);
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
     if (scanned) return;
@@ -148,93 +133,96 @@ export default function IngresosScreen() {
 
   const updateCant = (id: string, delta: number) =>
     setItems(prev => prev.map(it => it.variante_id === id
-      ? { ...it, cantidad: Math.max(1, Math.min(it.cantidad + delta, it.pendienteTotal)) }
+      ? { ...it, cantidad: Math.max(1, Math.min(it.cantidad + delta, it.stock_origen)) }
       : it));
   const removeItem = (id: string) => setItems(prev => prev.filter(it => it.variante_id !== id));
 
   const ejecutar = async () => {
-    if (!destinoId || !items.length || executing) return;
+    if (!rutaLista || !items.length || !user || executing) return;
     setExecuting(true);
     try {
-      // Reparte cada item entre los lotes de origen (FIFO por fecha) y agrupa por
-      // distribución, porque enviar-a-tiendas es un endpoint por lote.
-      const porDistribucion = new Map<string, { codigo: string; items: { detalle_id: string; cantidad: number }[] }>();
-      for (const it of items) {
-        let restante = it.cantidad;
-        for (const ref of it.refs) {
-          if (restante <= 0) break;
-          const usar = Math.min(restante, ref.disponible);
-          if (usar <= 0) continue;
-          restante -= usar;
-          if (!porDistribucion.has(ref.distribucion_id)) {
-            porDistribucion.set(ref.distribucion_id, { codigo: ref.distribucion_codigo, items: [] });
-          }
-          porDistribucion.get(ref.distribucion_id)!.items.push({ detalle_id: ref.detalle_id, cantidad: usar });
-        }
+      if (user.rol === 'almacenero') {
+        // Cola de aprobación (mismo contrato que la PWA para el rol almacenero)
+        await railwayPost('/api/operaciones/encolar/', {
+          tipo_operacion: 'VENTA',
+          items: items.map(it => ({
+            codigo_barras: it.codigo_barras, cantidad: it.cantidad,
+            almacen_origen_id: origenId, almacen_destino_id: destinoId,
+          })),
+          usuario_id: user.id, usuario_nombre: user.username, rol: user.rol,
+        });
+        setResultado({ tipo: 'pendiente', total: totalPrendas });
+      } else {
+        // Un solo request en batch — mismo endpoint que la PWA y el ERP
+        const res: any = await railwayPost('/api/operaciones/venta-multiple/', {
+          items: items.map(it => ({ codigo_barras: it.codigo_barras, cantidad: it.cantidad })),
+          almacen_origen_id: origenId,
+          almacen_destino_id: destinoId,
+          usuario_id: user.id,
+        });
+        const errores = (res?.errores_detalle || []).map((e: any) => ({
+          codigo_barras: e?.codigo_barras || '?',
+          error: e?.error || e?.mensaje || 'Error',
+        }));
+        setResultado({ tipo: 'directo', procesados: res?.procesados ?? (items.length - errores.length), errores });
+        syncDatabase().catch(() => {});
       }
-
-      let procesados = 0;
-      const errores: { codigo: string; error: string }[] = [];
-      for (const [distId, payload] of porDistribucion) {
-        try {
-          await enviarATiendas(distId, payload.items);
-          procesados += payload.items.reduce((s, i) => s + i.cantidad, 0);
-        } catch (e: any) {
-          errores.push({ codigo: payload.codigo, error: e?.message || 'Error' });
-        }
-      }
-
       setSnapshot([...items]);
-      setResultado({ procesados, errores });
       setItems([]);
       Vibration.vibrate([0, 80, 60, 80]);
-      syncDatabase().catch(() => {});
-      refetchPendiente();
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Error al confirmar el ingreso');
+      Alert.alert('Error', e?.message || 'Error al registrar la venta');
     } finally {
       setExecuting(false);
     }
   };
 
-  const nuevoIngreso = () => {
+  // Igual que la PWA: origen y destino se conservan para seguir vendiendo desde el mismo puesto
+  const nuevaVenta = () => {
     setResultado(null);
     setSnapshot([]);
-    setDestinoId(null);
   };
 
   // ─── Render ───
 
   if (resultado) {
-    const hayErrores = resultado.errores.length > 0;
+    const okTotal = resultado.tipo === 'pendiente' ? resultado.total
+      : snapshot.reduce((s, it) => s + it.cantidad, 0);
+    const okSoles = snapshot.reduce((s, it) => s + it.cantidad * it.precio, 0);
+    const hayErrores = resultado.tipo === 'directo' && resultado.errores.length > 0;
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
           <View style={{ backgroundColor: hayErrores ? C.amber + '18' : C.emerald + '18', borderRadius: 16, padding: 20, alignItems: 'center', gap: 8, borderWidth: 1.5, borderColor: hayErrores ? C.amber : C.emerald }}>
             {hayErrores ? <AlertTriangle size={44} color={C.amber} strokeWidth={1.8} /> : <CheckCircle size={44} color={C.emerald} strokeWidth={1.8} />}
             <Text style={{ color: C.white, fontSize: 18, fontWeight: '900', textAlign: 'center' }}>
-              {hayErrores ? 'INGRESO CON ERRORES' : 'INGRESO CONFIRMADO'}
+              {resultado.tipo === 'pendiente' ? 'ENVIADO PARA APROBACIÓN' : hayErrores ? 'VENTA CON ERRORES' : 'VENTA REGISTRADA'}
             </Text>
             <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center' }}>
-              {destinoAlm?.nombre} · {resultado.procesados} prendas
+              {origenId === destinoId ? `${origenAlm?.nombre} (venta directa)` : `${origenAlm?.nombre} → ${destinoAlm?.nombre}`} · {okTotal} prendas · S/ {okSoles.toFixed(2)}
             </Text>
+            {resultado.tipo === 'pendiente' && (
+              <Text style={{ color: C.textMuted, fontSize: 11, textAlign: 'center' }}>
+                Un admin/supervisor debe aprobarlo antes de que mueva stock
+              </Text>
+            )}
           </View>
 
-          {hayErrores && (
+          {hayErrores && resultado.tipo === 'directo' && (
             <View style={{ backgroundColor: C.card, borderRadius: 12, padding: 14, borderLeftWidth: 3, borderLeftColor: C.red, gap: 6 }}>
               <Text style={{ color: C.red, fontSize: 13, fontWeight: '700' }}>Errores ({resultado.errores.length})</Text>
               {resultado.errores.map((er, i) => (
-                <Text key={er.codigo + i} style={{ color: C.textSecondary, fontSize: 11 }} numberOfLines={2}>
-                  {er.codigo}: {er.error}
+                <Text key={`${er.codigo_barras}-${i}`} style={{ color: C.textSecondary, fontSize: 11 }} numberOfLines={2}>
+                  {er.codigo_barras}: {er.error}
                 </Text>
               ))}
             </View>
           )}
 
-          <Pressable onPress={nuevoIngreso}
+          <Pressable onPress={nuevaVenta}
             style={{ backgroundColor: C.accent, borderRadius: 14, padding: 16, flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-            <PackageCheck size={18} color={C.white} />
-            <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>Nuevo ingreso</Text>
+            <ShoppingCart size={18} color={C.white} />
+            <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>Nueva venta</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -245,30 +233,48 @@ export default function IngresosScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
 
-        {/* ── Destino ── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700' }}>ALMACÉN DESTINO</Text>
-          <Pressable onPress={() => refetchPendiente()} hitSlop={8}>
-            <RefreshCw size={14} color={C.textMuted} />
-          </Pressable>
-        </View>
-        <AlmacenPills almacenes={almacenes} selectedId={destinoId}
-          onSelect={(id) => setDestinoId(id === destinoId ? null : id)} />
+        {/* ── Origen ── */}
+        <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>ORIGEN — DÓNDE ESTÁN LAS PRENDAS</Text>
+        <AlmacenPills almacenes={almacenes || []} selectedId={origenId}
+          onSelect={(id) => setOrigenId(id === origenId ? null : id)} />
 
-        {destinoId && (
-          pendienteLoading ? (
-            <ActivityIndicator size="small" color={C.textMuted} />
-          ) : pendienteData?.almacen_principal === null ? (
-            <Text style={{ color: C.amber, fontSize: 12 }}>No hay Almacén Principal configurado en el ERP.</Text>
-          ) : (
-            <Text style={{ color: C.textMuted, fontSize: 11 }}>
-              {pendienteParaDestino.length} referencias · {totalPendienteDestino} prendas pendientes de ingresar a {destinoAlm?.nombre}
-            </Text>
-          )
+        {/* ── Destino (puesto de venta) ── */}
+        {origenId && (
+          <>
+            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>PUESTO DE VENTA</Text>
+            <AlmacenPills almacenes={almacenes || []} selectedId={destinoId}
+              onSelect={(id) => setDestinoId(id === destinoId ? null : id)} />
+          </>
+        )}
+
+        {/* ── Ruta ── */}
+        {rutaLista && (
+          <View style={{ backgroundColor: C.card, borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border }}>
+            <AlmacenSwatch almacen={origenAlm} width={10} height={36} radius={5} />
+            {ventaDirecta ? (
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <Text style={{ color: C.emerald, fontSize: 10, fontWeight: '700' }}>VENTA DIRECTA</Text>
+                <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{origenAlm?.nombre}</Text>
+              </View>
+            ) : (
+              <>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.amberLight, fontSize: 10, fontWeight: '700' }}>ORIGEN</Text>
+                  <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{origenAlm?.nombre}</Text>
+                </View>
+                <ArrowRight size={18} color={C.textMuted} />
+                <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                  <Text style={{ color: C.indigoLight, fontSize: 10, fontWeight: '700' }}>PUESTO DE VENTA</Text>
+                  <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{destinoAlm?.nombre}</Text>
+                </View>
+              </>
+            )}
+            <AlmacenSwatch almacen={destinoAlm} width={10} height={36} radius={5} />
+          </View>
         )}
 
         {/* ── Escaneo ── */}
-        {destinoId && (
+        {rutaLista && (
           <>
             {cameraOpen && permission?.granted && (
               <View style={{ height: 220, borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: C.indigo }}>
@@ -321,8 +327,8 @@ export default function IngresosScreen() {
         {items.length > 0 && (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700' }}>PRENDAS A INGRESAR</Text>
-              <Text style={{ color: C.accentLight, fontSize: 12, fontWeight: '800' }}>{items.length} refs · {totalPrendas} uds</Text>
+              <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700' }}>PRENDAS A VENDER</Text>
+              <Text style={{ color: C.accentLight, fontSize: 12, fontWeight: '800' }}>{items.length} refs · {totalPrendas} uds · S/ {totalSoles.toFixed(2)}</Text>
             </View>
             {items.map(it => (
               <View key={it.variante_id} style={{ backgroundColor: C.card, borderRadius: 12, padding: 12, gap: 8, borderWidth: 1, borderColor: C.border }}>
@@ -332,9 +338,10 @@ export default function IngresosScreen() {
                       {it.marca} · {it.modelo}
                     </Text>
                     <Text style={{ color: C.textSecondary, fontSize: 11 }} numberOfLines={1}>
-                      {it.color} · T{it.talla} · pendiente {it.pendienteTotal}
+                      {it.fit ? `${it.fit} · ` : ''}{it.color} · T{it.talla} · stock {it.stock_origen}
                     </Text>
                   </View>
+                  <Text style={{ color: C.emerald, fontSize: 13, fontWeight: '800' }}>S/ {(it.precio * it.cantidad).toFixed(2)}</Text>
                   <Pressable onPress={() => removeItem(it.variante_id)} hitSlop={8}
                     style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: C.redSurface, alignItems: 'center', justifyContent: 'center' }}>
                     <Trash2 size={15} color={C.red} />
@@ -346,23 +353,23 @@ export default function IngresosScreen() {
                     <Minus size={16} color={C.textSecondary} />
                   </Pressable>
                   <Text style={{ color: C.white, fontSize: 18, fontWeight: '900', minWidth: 36, textAlign: 'center' }}>{it.cantidad}</Text>
-                  <Pressable onPress={() => updateCant(it.variante_id, 1)} disabled={it.cantidad >= it.pendienteTotal}
-                    style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', opacity: it.cantidad >= it.pendienteTotal ? 0.4 : 1 }}>
+                  <Pressable onPress={() => updateCant(it.variante_id, 1)} disabled={it.cantidad >= it.stock_origen}
+                    style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', opacity: it.cantidad >= it.stock_origen ? 0.4 : 1 }}>
                     <Plus size={16} color={C.textSecondary} />
                   </Pressable>
                   <View style={{ flex: 1 }} />
-                  <Text style={{ color: C.textMuted, fontSize: 11 }}>máx {it.pendienteTotal}</Text>
+                  <Text style={{ color: C.textMuted, fontSize: 11 }}>máx {it.stock_origen}</Text>
                 </View>
               </View>
             ))}
           </>
         )}
 
-        {destinoId && items.length === 0 && (
+        {rutaLista && items.length === 0 && (
           <View style={{ alignItems: 'center', paddingVertical: 24, gap: 6 }}>
-            <PackageCheck size={32} color={C.textMuted} strokeWidth={1.5} />
+            <ShoppingCart size={32} color={C.textMuted} strokeWidth={1.5} />
             <Text style={{ color: C.textMuted, fontSize: 13, textAlign: 'center' }}>
-              Escanea las prendas que llegaron del Almacén Principal{'\n'}a {destinoAlm?.nombre}
+              Escanea las prendas vendidas{'\n'}{ventaDirecta ? `en ${origenAlm?.nombre}` : `de ${origenAlm?.nombre} para ${destinoAlm?.nombre}`}
             </Text>
           </View>
         )}
@@ -370,12 +377,15 @@ export default function IngresosScreen() {
 
       {/* ── Footer fijo ── */}
       {items.length > 0 && (
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border, padding: 12 }}>
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border, padding: 12, gap: 10 }}>
           <Pressable onPress={ejecutar} disabled={executing}
             style={{ backgroundColor: executing ? C.accentSurface : C.emerald, borderRadius: 14, padding: 16, flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: executing ? 0.7 : 1 }}>
             {executing ? <ActivityIndicator size="small" color={C.white} /> : <Send size={18} color={C.white} />}
             <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>
-              {executing ? 'Procesando...' : `Confirmar ingreso · ${totalPrendas} prendas`}
+              {executing ? 'Procesando...'
+                : user?.rol === 'almacenero'
+                  ? `Enviar para aprobación · ${totalPrendas} prendas`
+                  : `Registrar venta · ${totalPrendas} prendas · S/ ${totalSoles.toFixed(2)}`}
             </Text>
           </Pressable>
         </View>

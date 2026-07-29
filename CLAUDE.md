@@ -62,6 +62,8 @@ KarolayJeansERP (Django + PostgreSQL en Railway)
 ### Escritura (directo a Railway):
 - Traslado (almacenero) → `POST /api/operaciones/encolar/` (cola de aprobación)
 - Traslado (admin/supervisor) → `POST /api/operaciones/registrar/` (uno por item, directo)
+- Venta (almacenero) → `POST /api/operaciones/encolar/` con `tipo_operacion: "VENTA"` (cola de aprobación)
+- Venta (admin/supervisor) → `POST /api/operaciones/venta-multiple/` (UN request en batch, ver pantalla Ventas)
 - Ingreso (solo admin/supervisor) → `POST /api/inventario/distribuciones/<id>/enviar-a-tiendas/` (uno por lote involucrado, sin cola de aprobación — no existe ese tipo_operacion en el backend)
 - Login → `POST /api/auth/token-movil/` en KarolayJeansERP
 
@@ -150,7 +152,7 @@ plantilla (GET /api/plantillas-etiqueta/, la es_default)
 
 ## Pantallas
 
-### Tabs (orden): Escáner → Consultas → Traslado → Ingresos (Ingresos solo visible para admin/supervisor)
+### Tabs (orden): Escáner → Consultas → Traslado → Ventas → Ingresos (Ingresos solo visible para admin/supervisor)
 (2026-07-27: se eliminaron definitivamente Conteo, Operaciones, Movimientos e index.tsx —
 código muerto sin uso; ver "Notas técnicas" para detalle. `escaner` es la ruta inicial via
 `unstable_settings` en `_layout.tsx`. Mismo día se agregó el tab Ingresos.)
@@ -185,7 +187,28 @@ código muerto sin uso; ver "Notas técnicas" para detalle. `escaner` es la ruta
 - **Impresión de etiquetas**: toggle "Imprimir etiquetas" (default ON) + chip de estado de impresora (tap = refrescar). Imprime al ejecutar y hay botón Imprimir/Reimprimir en la pantalla de resultado
 - Pantalla de resultado: header ✓/⚠, errores por item si los hay, estado de impresión, "Nuevo traslado"
 
-### 4. Ingresos (`app/(tabs)/ingresos.tsx`) — solo admin/supervisor
+### 4. Ventas (`app/(tabs)/ventas.tsx`) — todos los roles
+Registra ventas del día contra el mismo endpoint que usa la PWA (`/ventas` de KarolayJeansApp) y el ERP:
+`POST /api/operaciones/venta-multiple/` — UN solo request en batch `{items:[{codigo_barras,cantidad}], almacen_origen_id, almacen_destino_id, usuario_id}`.
+- **Origen** ("dónde están las prendas") y **Puesto de venta** (destino) con `AlmacenPills`. A diferencia de
+  Traslados, lista TODOS los almacenes activos (incluido Principal) y **origen === destino es VÁLIDO**
+  ("venta directa desde el mismo almacén" — igual que la PWA).
+- **Venta con préstamo**: si origen ≠ destino, el backend genera 2 filas de kardex por item
+  (TRASLADO origen→puesto + VENTA desde el puesto). Es el flujo esperado cuando una tienda
+  vende stock que está en otra. Con origen == destino solo genera la VENTA.
+- **Escaneo**: cámara automática igual que Traslados; valida stock del origen en SQLite; escaneo
+  repetido suma +1 y sube el item al tope (paridad con la PWA); stepper capado al stock del origen.
+- Muestra precio por item y total en S/ (solo display — el kardex NO persiste el precio de venta;
+  los reportes lo derivan del precio actual de la variante).
+- **Ejecutar según rol**: almacenero → `POST /api/operaciones/encolar/` con `tipo_operacion: "VENTA"`
+  (cola de aprobación, mismo contrato que la PWA); admin/supervisor → `venta-multiple` directo.
+- ⚠️ `venta-multiple` responde **HTTP 200 SIEMPRE**, incluso si todo falló — hay que leer
+  `errores`/`errores_detalle` del body, no el status. La pantalla lo hace y muestra errores por item.
+- Tras vender: se limpia el carrito pero **origen/destino se conservan** (para seguir vendiendo desde
+  el mismo puesto, igual que la PWA). Dispara `syncDatabase()` para refrescar stock local.
+- No imprime etiquetas (ventas no imprime en ningún cliente del ecosistema).
+
+### 5. Ingresos (`app/(tabs)/ingresos.tsx`) — solo admin/supervisor
 Confirma la **Fase 2 ("Enviar a Tiendas")** del flujo "Ingresos de Stock" / "Lotes Por Ingresar" del ERP
 (modelo `Distribucion`/`DistribucionDetalle`, app Django `inventario`). La Fase 1 (armar el lote,
 "Recibir en Principal", que es cuando se consume la etiqueta física) sigue siendo tarea de escritorio
@@ -207,7 +230,7 @@ en KarolayJeansApp — esta pantalla solo cubre la entrega física del Almacén 
   la pantalla completa está oculta para `rol === 'almacenero'` en `_layout.tsx` (`href: null`), no solo
   el botón de ejecutar
 
-### 5. Perfil (`app/perfil.tsx`)
+### 6. Perfil (`app/perfil.tsx`)
 - Info del usuario (nombre, username, rol)
 - **Base de datos local**: última sync, variantes, stock, estado
 - Botón "Sincronizar ahora" (incremental)
