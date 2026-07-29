@@ -242,6 +242,11 @@ en KarolayJeansApp — esta pantalla solo cubre la entrega física del Almacén 
 
 Login contra Railway (`POST /api/auth/token-movil/`):
 - Devuelve JWT access + refresh tokens, guardados en AsyncStorage
+- **Sesión de 30 días (2026-07-28)**: `token-movil` emite un refresh de 30 días SOLO para esta app
+  (`MobileTokenView` en el ERP lo re-emite con `set_exp`; el global SimpleJWT sigue en 1 día para
+  PWA/ERP web). La app abre directo al escáner mientras la sesión viva; login solo tras cerrar
+  sesión o pasados 30 días. Sesiones iniciadas ANTES del cambio conservan su refresh de 1 día
+  hasta el próximo login.
 - Verifica: is_staff O rol in {admin, supervisor, almacenero}
 - Trim + lowercase en username, trim en password
 - Sesión: AsyncStorage key `@karolayjeansmovil_user`
