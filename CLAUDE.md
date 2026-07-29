@@ -29,7 +29,7 @@ Es parte del ecosistema Redel:
 - **Módulo nativo local `modules/spp-printer`** (Kotlin, Bluetooth SPP → impresora térmica)
 - **Lucide React Native** (iconos)
 - **AsyncStorage** (sesión, borradores, configuración)
-- Dark theme mocha/carbon (consistente con ecosistema Redel)
+- **Tema Redel oscuro** (2026-07-28): paleta canónica del ecosistema en variante oscura — casi-negro `#0d0d0d` + plata, acento azul marino `#2A5FAA`, ámbar de marca `#F0A050` (referencia: `Redel EIRL/Redel/frontend/src/index.css`). Login con `logo-redel-login.png`; ícono de app `icon-redel.png` (aplica en el próximo APK)
 - **NO usa Supabase** — conecta directamente a KarolayJeansERP en Railway via HTTP + JWT
 
 **IMPORTANTE**: expo-sqlite usa API sync (`openDatabaseSync`, `getAllSync`, `getFirstSync`, `execSync`) porque la API async (`prepareAsync`) tiene un bug de NullPointerException en Expo Go SDK 54. NO cambiar a API async.
@@ -113,7 +113,7 @@ KarolayJeansMovilApp/
 │   ├── distribuciones.ts        # Ingresos de Stock: pendiente-principal + enviar-a-tiendas (Railway directo)
 │   ├── labelPrint.ts            # Plantilla ERP + HTML del renderizador TSPL2
 │   ├── vendor/jsbarcodeSource.ts# Bundle UMD de jsbarcode como string (generado, no editar)
-│   ├── colors.ts                # Paleta mocha/carbon
+│   ├── colors.ts                # Paleta Redel oscura (ecosistema)
 │   └── types.ts                 # Interfaces TypeScript
 ├── modules/
 │   └── spp-printer/             # Módulo nativo local (Expo Modules API)
