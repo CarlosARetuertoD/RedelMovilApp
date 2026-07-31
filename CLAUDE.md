@@ -1,5 +1,13 @@
 # KarolayJeansMovilApp — Guía completa
 
+## Contexto del ecosistema Redel
+
+Este proyecto es parte del ecosistema Redel de Carlos Retuerto. Antes de hacer cambios grandes, sigue el protocolo del vault `C:\Users\DELL\OneDrive\Escritorio\ClaudIAMemory`, página `wiki/conceptos/Protocolo de arranque en una app existente.md`:
+
+1. Lee la página de esta app y de su empresa en `wiki/empresas/`.
+2. Lee las fuentes de verdad: `wiki/conceptos/Arquitectura Redel.md`, `Estándar de diseño Redel.md`, `Requisitos de seguridad Redel.md`, `Requisitos de integridad de datos Redel.md` y `wiki/Errores a no repetir.md`.
+3. Verifica el estado REAL del código (`git log`, `git status`) antes de confiar en lo que diga el wiki — puede estar desactualizado.
+
 ## Qué es
 
 App móvil de inventario para **Negocios e Inversiones Karolay** (tienda de ropa). Permite al personal de almacén consultar productos, trasladar stock entre almacenes (con impresión de etiquetas), confirmar ingresos de lotes desde Almacén Principal (solo admin/supervisor) y escanear códigos de barras usando **pistola láser USB** o **cámara del celular** (expo-camera).
