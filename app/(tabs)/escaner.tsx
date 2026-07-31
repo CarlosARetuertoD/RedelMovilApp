@@ -6,6 +6,8 @@ import { router } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Svg, { Rect, Line } from 'react-native-svg';
 import { escanearProducto } from '../../lib/queries';
+import { scanFeedbackOk, scanFeedbackError } from '../../lib/scanFeedback';
+import { useScanGuard } from '../../lib/scanGuard';
 import { C } from '../../lib/colors';
 import useSettingsStore from '../../store/settingsStore';
 import type { ProductoEscaneado } from '../../lib/types';
@@ -324,9 +326,9 @@ export default function EscanerScreen() {
   const [error, setError] = useState('');
   const [inputCode, setInputCode] = useState('');
   const [cameraOpen, setCameraOpen] = useState(true);
-  const [scanned, setScanned] = useState(false);
   const [navegando, setNavegando] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const { guard, reset: resetScanGuard } = useScanGuard();
 
   useEffect(() => { if (!permission?.granted) requestPermission(); }, []);
 
@@ -335,10 +337,10 @@ export default function EscanerScreen() {
     setLoading(true); setError('');
     try {
       const result = await escanearProducto(code.trim());
-      if (result) { setProducto(result); }
-      else { setProducto(null); setError(`No encontrado: ${code.trim().padStart(13, '0')}`); }
+      if (result) { setProducto(result); scanFeedbackOk(); }
+      else { setProducto(null); setError(`No encontrado: ${code.trim().padStart(13, '0')}`); scanFeedbackError(); }
     } catch (e: any) {
-      setProducto(null); setError(e.message || 'Error al buscar');
+      setProducto(null); setError(e.message || 'Error al buscar'); scanFeedbackError();
     } finally {
       setLoading(false); setNavegando(null); setInputCode('');
     }
@@ -349,21 +351,20 @@ export default function EscanerScreen() {
       const res = await requestPermission();
       if (!res.granted) return;
     }
-    setCameraOpen(!cameraOpen); setScanned(false);
-  }, [cameraOpen, permission, requestPermission]);
+    setCameraOpen(!cameraOpen); resetScanGuard();
+  }, [cameraOpen, permission, requestPermission, resetScanGuard]);
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (scanned || loading) return;
-    setScanned(true); setCameraOpen(false); handleScan(data);
-    setTimeout(() => setScanned(false), 1500);
-  }, [scanned, loading, handleScan]);
+    if (loading) return;
+    guard(data, (code) => { setCameraOpen(false); handleScan(code); });
+  }, [guard, loading, handleScan]);
 
   const navegarA = useCallback((barcode: string) => {
     if (!barcode || loading) return;
     setNavegando(barcode); handleScan(barcode);
   }, [handleScan, loading]);
 
-  const limpiar = useCallback(() => { setProducto(null); setError(''); setCameraOpen(true); setScanned(false); }, []);
+  const limpiar = useCallback(() => { setProducto(null); setError(''); setCameraOpen(true); resetScanGuard(); }, [resetScanGuard]);
 
   return (
     <ScrollView

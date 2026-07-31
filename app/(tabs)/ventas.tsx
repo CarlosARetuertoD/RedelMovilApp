@@ -7,6 +7,8 @@ import useAuthStore from '../../store/authStore';
 import { fetchAlmacenes, escanearProducto } from '../../lib/queries';
 import { railwayPost } from '../../lib/railway';
 import { syncDatabase } from '../../lib/sync';
+import { scanFeedbackOk, scanFeedbackError } from '../../lib/scanFeedback';
+import { useScanGuard } from '../../lib/scanGuard';
 import { AlmacenPills, AlmacenSwatch } from '../../components/AlmacenPills';
 import { C } from '../../lib/colors';
 
@@ -40,13 +42,13 @@ export default function VentasScreen() {
   const [inputCode, setInputCode] = useState('');
   const [scanMsg, setScanMsg] = useState<{ text: string; color: string } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [scanned, setScanned] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [snapshot, setSnapshot] = useState<VentaItem[]>([]);
 
   const inputRef = useRef<TextInput>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const { guard, reset: resetScanGuard } = useScanGuard();
 
   // Origen === destino es válido: "venta directa desde el mismo almacén"
   const rutaLista = !!(origenId && destinoId);
@@ -79,18 +81,18 @@ export default function VentasScreen() {
     if (!origenId) { show('Selecciona el almacén origen primero', C.amber); return; }
     try {
       const data = await escanearProducto(code);
-      if (!data) { show(`No encontrado: ${code}`, C.red); Vibration.vibrate(300); return; }
+      if (!data) { show(`No encontrado: ${code}`, C.red); scanFeedbackError(); return; }
       const stockOrigen = data.stockPorAlmacen.find((s: any) => s.almacen_id === origenId)?.cantidad ?? 0;
       if (stockOrigen <= 0) {
         show(`Sin stock en ${origenAlm?.nombre || 'origen'}: ${data.sku_variant}`, C.red);
-        Vibration.vibrate(300);
+        scanFeedbackError();
         return;
       }
       const existing = items.find(it => it.variante_id === data.id);
       if (existing) {
         if (existing.cantidad >= stockOrigen) {
           show(`Máximo stock en origen (${stockOrigen}): ${data.sku_variant}`, C.amber);
-          Vibration.vibrate(300);
+          scanFeedbackError();
           return;
         }
         // Igual que la PWA: escaneo repetido suma +1 y sube el ítem al tope
@@ -99,7 +101,7 @@ export default function VentasScreen() {
           return [{ ...it, cantidad: it.cantidad + 1 }, ...prev.filter(p => p.variante_id !== data.id)];
         });
         show(`+1 ${data.sku_variant} → ${existing.cantidad + 1}/${stockOrigen}`, C.blue);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       } else {
         setItems(prev => [{
           variante_id: data.id, sku_variant: data.sku_variant, codigo_barras: data.codigo_barras,
@@ -108,7 +110,7 @@ export default function VentasScreen() {
           precio: Number(data.precio) || 0, stock_origen: stockOrigen, cantidad: 1,
         }, ...prev]);
         show(`+ ${data.sku_variant} (stock: ${stockOrigen})`, C.emerald);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       }
     } catch {
       show('Error al buscar', C.red);
@@ -116,11 +118,8 @@ export default function VentasScreen() {
   }, [origenId, origenAlm, items]);
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (scanned) return;
-    setScanned(true);
-    handleScan(data);
-    setTimeout(() => setScanned(false), 1500);
-  }, [scanned, handleScan]);
+    guard(data, handleScan);
+  }, [guard, handleScan]);
 
   const toggleCamera = useCallback(async () => {
     if (!cameraOpen && !permission?.granted) {
@@ -128,8 +127,8 @@ export default function VentasScreen() {
       if (!r.granted) { Alert.alert('Cámara', 'Se necesita permiso de cámara para escanear'); return; }
     }
     setCameraOpen(v => !v);
-    setScanned(false);
-  }, [cameraOpen, permission, requestPermission]);
+    resetScanGuard();
+  }, [cameraOpen, permission, requestPermission, resetScanGuard]);
 
   const updateCant = (id: string, delta: number) =>
     setItems(prev => prev.map(it => it.variante_id === id
@@ -181,6 +180,7 @@ export default function VentasScreen() {
   const nuevaVenta = () => {
     setResultado(null);
     setSnapshot([]);
+    resetScanGuard();
   };
 
   // ─── Render ───

@@ -41,7 +41,8 @@
         {
           "cameraPermission": "Permitir a KarolayJeansMovil usar la cámara para escanear códigos de barras"
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "extra": {
       "router": {},

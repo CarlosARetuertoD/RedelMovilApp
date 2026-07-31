@@ -6,6 +6,8 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { fetchAlmacenes, escanearProducto } from '../../lib/queries';
 import { fetchPendientePrincipal, enviarATiendas } from '../../lib/distribuciones';
 import { syncDatabase } from '../../lib/sync';
+import { scanFeedbackOk, scanFeedbackError } from '../../lib/scanFeedback';
+import { useScanGuard } from '../../lib/scanGuard';
 import { C } from '../../lib/colors';
 import { AlmacenPills } from '../../components/AlmacenPills';
 
@@ -47,13 +49,13 @@ export default function IngresosScreen() {
   const [inputCode, setInputCode] = useState('');
   const [scanMsg, setScanMsg] = useState<{ text: string; color: string } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [scanned, setScanned] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [snapshot, setSnapshot] = useState<IngresoItem[]>([]);
 
   const inputRef = useRef<TextInput>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const { guard, reset: resetScanGuard } = useScanGuard();
 
   const destinoAlm = (almacenes || []).find((a: any) => a.id === destinoId);
   const totalPrendas = items.reduce((s, it) => s + it.cantidad, 0);
@@ -88,7 +90,7 @@ export default function IngresosScreen() {
     if (!destinoId) { show('Selecciona el almacén destino primero', C.amber); return; }
     try {
       const data = await escanearProducto(code);
-      if (!data) { show(`No encontrado: ${code}`, C.red); Vibration.vibrate(300); return; }
+      if (!data) { show(`No encontrado: ${code}`, C.red); scanFeedbackError(); return; }
 
       const matches: RefPendiente[] = (pendienteData?.distribuciones || [])
         .flatMap((d: any) => d.items_pendientes
@@ -101,7 +103,7 @@ export default function IngresosScreen() {
 
       if (pendienteTotal <= 0) {
         show(`Sin lote pendiente para ${data.sku_variant} → ${destinoAlm?.nombre || 'destino'}`, C.red);
-        Vibration.vibrate(300);
+        scanFeedbackError();
         return;
       }
 
@@ -109,12 +111,12 @@ export default function IngresosScreen() {
       if (existing) {
         if (existing.cantidad >= existing.pendienteTotal) {
           show(`Máximo pendiente (${existing.pendienteTotal}): ${data.sku_variant}`, C.amber);
-          Vibration.vibrate(300);
+          scanFeedbackError();
           return;
         }
         setItems(prev => prev.map(it => it.variante_id === data.id ? { ...it, cantidad: it.cantidad + 1 } : it));
         show(`+1 ${data.sku_variant} → ${existing.cantidad + 1}/${existing.pendienteTotal}`, C.blue);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       } else {
         setItems(prev => [...prev, {
           variante_id: data.id, sku_variant: data.sku_variant,
@@ -123,7 +125,7 @@ export default function IngresosScreen() {
           cantidad: 1, pendienteTotal, refs: matches,
         }]);
         show(`+ ${data.sku_variant} (pendiente: ${pendienteTotal})`, C.emerald);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       }
     } catch {
       show('Error al buscar', C.red);
@@ -131,11 +133,8 @@ export default function IngresosScreen() {
   }, [destinoId, destinoAlm, items, pendienteData]);
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (scanned) return;
-    setScanned(true);
-    handleScan(data);
-    setTimeout(() => setScanned(false), 1500);
-  }, [scanned, handleScan]);
+    guard(data, handleScan);
+  }, [guard, handleScan]);
 
   const toggleCamera = useCallback(async () => {
     if (!cameraOpen && !permission?.granted) {
@@ -143,8 +142,8 @@ export default function IngresosScreen() {
       if (!r.granted) { Alert.alert('Cámara', 'Se necesita permiso de cámara para escanear'); return; }
     }
     setCameraOpen(v => !v);
-    setScanned(false);
-  }, [cameraOpen, permission, requestPermission]);
+    resetScanGuard();
+  }, [cameraOpen, permission, requestPermission, resetScanGuard]);
 
   const updateCant = (id: string, delta: number) =>
     setItems(prev => prev.map(it => it.variante_id === id
@@ -201,6 +200,7 @@ export default function IngresosScreen() {
     setResultado(null);
     setSnapshot([]);
     setDestinoId(null);
+    resetScanGuard();
   };
 
   // ─── Render ───

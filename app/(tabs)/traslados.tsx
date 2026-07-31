@@ -7,6 +7,8 @@ import useAuthStore from '../../store/authStore';
 import { fetchAlmacenes, escanearProducto } from '../../lib/queries';
 import { railwayPost } from '../../lib/railway';
 import { syncDatabase } from '../../lib/sync';
+import { scanFeedbackOk, scanFeedbackError } from '../../lib/scanFeedback';
+import { useScanGuard } from '../../lib/scanGuard';
 import { fetchPlantillaEtiqueta, type LabelJob } from '../../lib/labelPrint';
 import { isNativePrinterAvailable, printerStatus, printBase64, requestBluetoothPermission, type PrinterStatus } from '../../modules/spp-printer';
 import LabelRenderer, { type LabelRendererHandle } from '../../components/LabelRenderer';
@@ -54,7 +56,6 @@ export default function TrasladosScreen() {
   const [inputCode, setInputCode] = useState('');
   const [scanMsg, setScanMsg] = useState<{ text: string; color: string } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [scanned, setScanned] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [imprimir, setImprimir] = useState(true);
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -66,6 +67,7 @@ export default function TrasladosScreen() {
   const inputRef = useRef<TextInput>(null);
   const rendererRef = useRef<LabelRendererHandle>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const { guard, reset: resetScanGuard } = useScanGuard();
 
   const rutaLista = !!(origenId && destinoId && origenId !== destinoId);
   const totalPrendas = items.reduce((s, it) => s + it.cantidad, 0);
@@ -104,23 +106,23 @@ export default function TrasladosScreen() {
     if (!origenId) { show('Selecciona el almacén origen primero', C.amber); return; }
     try {
       const data = await escanearProducto(code);
-      if (!data) { show(`No encontrado: ${code}`, C.red); Vibration.vibrate(300); return; }
+      if (!data) { show(`No encontrado: ${code}`, C.red); scanFeedbackError(); return; }
       const stockOrigen = data.stockPorAlmacen.find((s: any) => s.almacen_id === origenId)?.cantidad ?? 0;
       if (stockOrigen <= 0) {
         show(`Sin stock en ${origenAlm?.nombre || 'origen'}: ${data.sku_variant}`, C.red);
-        Vibration.vibrate(300);
+        scanFeedbackError();
         return;
       }
       const existing = items.find(it => it.variante_id === data.id);
       if (existing) {
         if (existing.cantidad >= stockOrigen) {
           show(`Máximo stock en origen (${stockOrigen}): ${data.sku_variant}`, C.amber);
-          Vibration.vibrate(300);
+          scanFeedbackError();
           return;
         }
         setItems(prev => prev.map(it => it.variante_id === data.id ? { ...it, cantidad: it.cantidad + 1 } : it));
         show(`+1 ${data.sku_variant} → ${existing.cantidad + 1}/${stockOrigen}`, C.blue);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       } else {
         setItems(prev => [...prev, {
           variante_id: data.id, sku_variant: data.sku_variant, codigo_barras: data.codigo_barras,
@@ -132,7 +134,7 @@ export default function TrasladosScreen() {
           stock_origen: stockOrigen, cantidad: 1,
         }]);
         show(`+ ${data.sku_variant} (stock: ${stockOrigen})`, C.emerald);
-        Vibration.vibrate(80);
+        scanFeedbackOk();
       }
     } catch {
       show('Error al buscar', C.red);
@@ -140,11 +142,8 @@ export default function TrasladosScreen() {
   }, [origenId, origenAlm, items]);
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (scanned) return;
-    setScanned(true);
-    handleScan(data);
-    setTimeout(() => setScanned(false), 1500);
-  }, [scanned, handleScan]);
+    guard(data, handleScan);
+  }, [guard, handleScan]);
 
   const toggleCamera = useCallback(async () => {
     if (!cameraOpen && !permission?.granted) {
@@ -152,8 +151,8 @@ export default function TrasladosScreen() {
       if (!r.granted) { Alert.alert('Cámara', 'Se necesita permiso de cámara para escanear'); return; }
     }
     setCameraOpen(v => !v);
-    setScanned(false);
-  }, [cameraOpen, permission, requestPermission]);
+    resetScanGuard();
+  }, [cameraOpen, permission, requestPermission, resetScanGuard]);
 
   const updateCant = (id: string, delta: number) =>
     setItems(prev => prev.map(it => it.variante_id === id
@@ -247,6 +246,7 @@ export default function TrasladosScreen() {
     setPrintMsg(null);
     setOrigenId(null);
     setDestinoId(null);
+    resetScanGuard();
   };
 
   // ─── Render ───

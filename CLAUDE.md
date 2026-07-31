@@ -24,6 +24,7 @@ Es parte del ecosistema Redel:
 - **TanStack React Query 5** (server state/cache)
 - **expo-sqlite 16** (BD local offline-first)
 - **expo-camera 17** (escaneo con cámara)
+- **expo-audio** (2026-07-31: beep de confirmación al escanear — `lib/scanFeedback.ts`)
 - **react-native-webview** (rasterizado de etiquetas a TSPL2 en WebView oculto)
 - **expo-dev-client** (development build — necesario porque hay módulo nativo propio)
 - **Módulo nativo local `modules/spp-printer`** (Kotlin, Bluetooth SPP → impresora térmica)
@@ -376,3 +377,25 @@ EXPO_PUBLIC_RAILWAY_URL=https://redelerp-backend-production.up.railway.app
   `apps/sync/views.py::_process_movement_rows()`) — hoy esa cola solo soporta `RECIBIR_EN_PRINCIPAL`.
   El endpoint `enviar-a-tiendas` es por lote (`distribucion_id` en la URL), no por variante — por eso
   `ingresos.tsx` agrupa el carrito por lote antes de ejecutar.
+- **2026-07-31 — Sonido de escaneo (`lib/scanFeedback.ts`)**: cada `handleScan` en Escáner/Traslados/Ventas/Ingresos
+  dispara `scanFeedbackOk()` (beep agudo 2200Hz ~90ms + vibración 80ms) o `scanFeedbackError()` (dos beeps graves
+  340Hz + vibración 300ms) — no encontrado / sin stock / tope alcanzado cuentan como error. Los dos WAV están en
+  `assets/sounds/` (generados por código, no grabados). Usa `expo-audio` (`createAudioPlayer`, players
+  precargados a nivel de módulo y reseteados con `seekTo(0)` antes de cada `play()`); si el módulo nativo no está
+  disponible (ver nota de rebuild abajo) `getPlayer()` atrapa el error y el escaneo sigue funcionando solo con
+  vibración. **Requiere rebuild**: `expo-audio` es nuevo (antes no estaba en package.json) — el APK/dev build
+  `e91ad0e6` no lo tiene compilado, hay que generar un nuevo development o preview build para que suene en ese
+  dispositivo. En Expo Go (`--go`) sí funciona sin rebuild (expo-audio viene incluido en el binario de Expo Go
+  de SDK 54, solo `spp-printer` se degrada ahí). Motivo del cambio: la cámara puede leer el mismo código dos
+  veces (se pasó/duplicó un escaneo real) y no había ninguna señal audible de que algo se leyó.
+- **2026-07-31 — Candado de escaneo por inactividad (`lib/scanGuard.ts`)**: reemplaza el candado viejo (booleano
+  `scanned` + `setTimeout` fijo de 1.5s) en Escáner/Traslados/Ventas/Ingresos. Causaba escaneos duplicados de
+  dos formas: (1) condición de carrera — varios frames de la cámara podían disparar `onBarcodeScanned` para
+  la misma lectura antes de que el estado `scanned` se actualizara; (2) si sostenías la prenda frente a la
+  cámara más de 1.5s, el candado se soltaba solo y volvía a sumar +1 sin que el usuario lo pidiera. El hook
+  nuevo usa un `ref` (no state, sin retraso de render) que se mantiene tomado **mientras la cámara siga viendo
+  cualquier código** y solo se libera ~700ms después de que deja de detectar algo (`IDLE_RELEASE_MS` en
+  `scanGuard.ts`) — sostener la prenda quieta ya no duplica, y reescanear el mismo SKU para sumar unidades
+  sigue funcionando (solo hay que apartar la cámara un instante entre una lectura y la siguiente, gesto natural
+  al pasar a la próxima prenda). `useScanGuard()` expone `guard(code, onAccepted)` y `reset()` — cada pantalla
+  llama `reset()` al abrir/cerrar la cámara manualmente y al iniciar un traslado/venta/ingreso nuevo.
